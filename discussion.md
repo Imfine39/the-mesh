@@ -272,7 +272,7 @@ flowchart TB
 
 * モック段階の AT は「画面体験のGiven-When-Then」を **Playwright 等のE2Eでスモーク保証**するのが現実的
 
-  * 例："Given ログイン済み When 申請フォームに入力して送信 Then 確認画面に遷移しサマリが表示される"
+  * 例:"Given ログイン済み When 申請フォームに入力して送信 Then 確認画面に遷移しサマリが表示される"
 * まだビジネス計算やDB整合が無いなら、ATは **遷移/表示/入力制約**に寄せる
 * 後で本実装（API/DB）が入ったら、同じATを本番経路に流して回帰テストにする
 
@@ -419,6 +419,27 @@ Issue必須：
 * 1 Issue = 1 worktree
 * 1 worktree = 1 PR（混ぜない）
 
+### 7.4 Taskの粒度（bundle/AT/REQとの対応）
+
+**結論：Taskは bundle の内側に置き、AT（受入テスト）を最小単位の“完了条件”にする。**
+
+* **bundle = 機能レベルのコンテキスト束**（Feature単位で固定）
+* **Task = bundle内の実行単位**（小さく切って並列化できる）
+* **完了条件 = 対応するATが通ること**
+
+#### Taskを「文章だけ」にしないためのルール
+
+* Taskには必ず **参照ID（REQ-* / AT-* / owns）** を持たせる
+* “終わった”は **対応ATがパス**した時点で判定する
+* Task一覧は、**AT一覧をベースに生成**し、追加実装が必要な場合のみ補助Taskを足す
+
+#### Task一覧 → Test一覧 になる？への答え
+
+* **ほぼ Yes**。最終的に「仕様が満たされた」ことはATのパスで証明されるため、
+  * Task = 「ATが通る状態にするための作業」
+  * Task一覧 = 「AT一覧 + そのATが通るまでの補助作業」
+* これにより、**“やったこと”がテストで証明できる**構造になる。
+
 ---
 
 ### 8. RFC運用（契約変更の集約）
@@ -475,12 +496,107 @@ Issue必須：
 * **GitHub**：Issue=実行指示書、PR=証跡（REQ/AT/owns/depends_on を必須に）
 * **CI**：validate/coverage/breaking を必須ゲート化（通らないとマージ不可）
 
+---
+
+## 合意できる“最適案”（暫定）
+
+この節は、現在の議論を「実運用で迷わない設計」に落とすための暫定結論です。曖昧さを残さず、運用と検証が噛み合う点を優先しています。
+
+### 1. 正の仕様の固定場所（機械検出フォーマット）
+
+**結論：frontmatter を正とする。テストは参照に徹する。**
+
+* frontmatter が唯一の Source of truth。
+* テスト側は `AT-*` を名寄せするだけにし、参照整合は validate で保証。
+
+**理由**
+
+* index/bundle生成が単純化し、参照漏れの検出が一貫する。
+* テストメタと文書メタが二重管理になる事故を防げる。
+
+**標準 frontmatter 仕様（案）**
+
+```
+---
+id: F-1234
+
+type: feature
+
+owns:
+  - api: /contracts/openapi/foo.yaml#/paths/~1foo
+  - table: db.public.foo
+
+depends_on:
+  - ruleset: R-1001
+  - glossary: G-2004
+
+acceptance:
+  - AT-1234-001
+  - AT-1234-002
+
+requirements:
+  - REQ-2026-0012
+  - REQ-2026-0013
+---
+```
+
+### 2. bundle 単位の原則
+
+**結論：bundle は Feature 単位固定とする。複合 bundle は禁止。**
+
+* 例：`BUNDLE-F-1234`。
+* cross-cutting の共通ルールは、個別 feature bundle に **参照として入れる**。
+
+**理由**
+
+* 作業単位（Issue/branch/worktree/PR）と bundle を一致させると、運用が崩れない。
+* AIの入力単位としても最小で安定する（大きくしすぎると文脈が散る）。
+
+### 3. OpenAPI / DB の breaking 判定の正の定義
+
+**結論：契約ファイル同士の差分比較を正とし、実装生成物は参考扱い。**
+
+* OpenAPI：`contracts/openapi/*.yaml` の差分を正とし、breaking は CI で落とす。
+* DB：`db/migrations` のポリシールールを CI で強制。
+
+**理由**
+
+* 「正の仕様」を“生成物”に寄せると差分が揺れる。
+* 仕様主導の前提では、契約ファイルが唯一の正であるべき。
+
+### 4. RFC の DoD（最低限合意するべき条件）
+
+**結論：契約変更があるなら、最低限次の4点が揃ってから main に入れる。**
+
+1. **契約差分の明示**（OpenAPI / migration / domainの差分）
+2. **AT 追加または改訂**（REQとのトレーサビリティを維持）
+3. **移行戦略（Expand → Migrate → Contract）**
+4. **validate / coverage / breaking の全ゲート通過**
+
+**理由**
+
+* RFC は「契約の正を更新する場」なので、契約・テスト・移行策が揃わないと merge すべきではない。
+
+### 5. 実運用に落とすときの最小構成
+
+**結論：最初に固定すべき3点**
+
+1. frontmatter schema（機械検出の正）
+2. validate（参照整合 + index 差分）
+3. REQ→AT coverage gate
+
+**理由**
+
+* この3つだけでも「言ったことが仕様化されない」事故を止められる。
+* OpenAPI / DB の breaking は段階的に導入可能。
+
+---
+
 ## 未決事項・論点（次の議論）
 
-* [ ] REQ/AT/owns/depends_on の“機械検出”フォーマットをどこに固定するか（frontmatterに寄せるか、テスト側メタに寄せるか）
-* [ ] bundle の単位（Feature単位固定か、複合bundleを許すか）
-* [ ] OpenAPI / DB の breaking 判定の採用ツール（何を正として差分を見るか）
-* [ ] RFCのDoD（最低限どこまで揃えば main に入れられるか）
+* [ ] 本ドキュメントの「最適案」を正式合意として固定するか（frontmatter正・Feature固定bundle・契約差分を正とするbreaking判定・RFCのDoD）
+* [ ] frontmatter schema を機械検出用に厳密化する際のバリデーション仕様（必須/任意・型・参照解決）
+* [ ] validate / coverage / breaking の最小CLIとCI実装順序
 
 ---
 
