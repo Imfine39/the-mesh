@@ -1,0 +1,322 @@
+# 会計システム仕様書（v6正式版）
+# 消込・請求・入金の完全仕様
+# v6: 構造化式形式 + selfキーワード
+
+meta:
+  id: SPEC-ACCOUNTING-V6-FULL
+  title: "会計システム - 消込管理"
+  version: "v6.0"
+  domain: accounting
+
+# ============================================
+# 要求定義
+# ============================================
+requirements:
+  REQ-001:
+    who: 経理担当者
+    why: 入金を請求に紐づけて売掛金を消すため
+    what: 部分消込ができること
+    conditions:
+      - id: COND-001-1
+        description: 残額がある請求に対して、残額以下の金額を消込できる
+        acceptance: [AT-001]
+      - id: COND-001-2
+        description: 消込後、残額が正しく減少する
+        acceptance: [AT-001]
+        verifies:
+          - expr: "remaining(invoice) == before_remaining - input.amount"
+
+  REQ-002:
+    who: 経理担当者
+    why: 完済した請求を自動でクローズし、管理工数を減らすため
+    what: 全額消込時に請求が自動クローズされること
+    conditions:
+      - id: COND-002-1
+        description: 残額が0になったら、請求ステータスがclosedになる
+        acceptance: [AT-002]
+        verifies:
+          - expr:
+              implies:
+                if: { eq: [{ call: remaining, args: [self] }, 0] }
+                then: { eq: ["self.status", "'closed'"] }
+
+  REQ-003:
+    who: 経理担当者
+    why: 過剰な消込による会計不整合を防ぐため
+    what: 残額を超える消込ができないこと
+    conditions:
+      - id: COND-003-1
+        description: 残額を超える金額での消込はエラーになる
+        acceptance: [AT-003]
+
+  REQ-004:
+    who: 経理担当者
+    why: 顧客間の会計混乱を防ぐため
+    what: 異なる顧客間での消込ができないこと
+    conditions:
+      - id: COND-004-1
+        description: 請求と入金の顧客が一致しない場合はエラー
+        acceptance: [AT-004]
+
+  REQ-005:
+    who: 経理担当者
+    why: 消込の取り消しを可能にするため
+    what: 消込を取り消せること
+    conditions:
+      - id: COND-005-1
+        description: 消込を取り消すと残額が元に戻る
+        acceptance: [AT-005]
+
+# ============================================
+# 状態定義
+# ============================================
+state:
+  customer:
+    id: string
+    name: string
+
+  invoice:
+    id: string
+    customer_id: string
+    amount: int
+    status: enum[open, closed, cancelled]
+    due_date: string
+
+  payment:
+    id: string
+    customer_id: string
+    amount: int
+    received_date: string
+
+  allocation:
+    id: string
+    invoice_id: string
+    payment_id: string
+    amount: int
+    status: enum[active, cancelled]
+
+# ============================================
+# 計算式
+# ============================================
+derived:
+  remaining:
+    description: 請求の残額
+    derived_from: [REQ-001, REQ-002, REQ-003]
+    # v6: 構造化形式
+    formula:
+      subtract:
+        - "self.amount"
+        - sum:
+            expr: "item.amount"
+            from: "allocation as item"
+            where:
+              and:
+                - "item.invoice_id == self.id"
+                - "item.status == 'active'"
+
+  total_allocated:
+    description: 入金の消込済み合計額
+    derived_from: [REQ-001]
+    formula:
+      sum:
+        expr: "item.amount"
+        from: "allocation as item"
+        where:
+          and:
+            - "item.payment_id == self.id"
+            - "item.status == 'active'"
+
+  payment_remaining:
+    description: 入金の未消込残額
+    derived_from: [REQ-001]
+    formula:
+      subtract:
+        - "self.amount"
+        - call: total_allocated
+          args: [self]
+
+# ============================================
+# 関数定義
+# ============================================
+functions:
+  allocate_payment:
+    description: 消込実行
+    implements: [REQ-001, REQ-002, REQ-003, REQ-004]
+    input:
+      invoice_id: string
+      payment_id: string
+      amount: int
+    pre:
+      - expr: "self.status == 'open'"
+        entity: invoice
+        reason: "クローズ済み請求には消込できない"
+      - expr:
+          ge:
+            - { call: payment_remaining, args: [payment] }
+            - "input.amount"
+        reason: "入金の未消込残額が不足"
+    error:
+      - code: OVER_ALLOCATION
+        when:
+          lt:
+            - { call: remaining, args: [invoice] }
+            - "input.amount"
+        reason: "残額を超える消込はできない"
+        required_by: REQ-003
+      - code: CUSTOMER_MISMATCH
+        when:
+          ne: ["invoice.customer_id", "payment.customer_id"]
+        reason: "請求と入金の顧客が一致しない"
+        required_by: REQ-004
+    post:
+      - action:
+          create: allocation
+          with:
+            invoice_id: "input.invoice_id"
+            payment_id: "input.payment_id"
+            amount: "input.amount"
+            status: "'active'"
+        reason: "消込レコードを作成"
+        required_by: REQ-001
+      - condition:
+          eq:
+            - { call: remaining, args: [invoice] }
+            - 0
+        action:
+          update: invoice
+          set:
+            status: "'closed'"
+        reason: "全額消込で自動クローズ"
+        required_by: REQ-002
+
+  cancel_allocation:
+    description: 消込取り消し
+    implements: [REQ-005]
+    input:
+      allocation_id: string
+    pre:
+      - expr: "self.status == 'active'"
+        entity: allocation
+        reason: "既に取り消し済みの消込は取り消せない"
+    post:
+      - action:
+          update: allocation
+          set:
+            status: "'cancelled'"
+        reason: "消込を無効化"
+      - condition: "invoice.status == 'closed'"
+        action:
+          update: invoice
+          set:
+            status: "'open'"
+        reason: "クローズ済み請求を再オープン"
+
+# ============================================
+# シナリオ
+# ============================================
+scenarios:
+  AT-001:
+    title: 部分消込で残額が減少する
+    verifies: [COND-001-1, COND-001-2]
+    given:
+      customer: { id: "CUST-001", name: "株式会社テスト" }
+      invoice: { id: "INV-001", customer_id: "CUST-001", amount: 100000, status: "open" }
+      payment: { id: "PAY-001", customer_id: "CUST-001", amount: 80000 }
+      allocation: []
+    when:
+      call: allocate_payment
+      input: { invoice_id: "INV-001", payment_id: "PAY-001", amount: 80000 }
+    then:
+      success: true
+      assert:
+        - expr:
+            eq:
+              - { call: remaining, args: [invoice] }
+              - 20000
+        - expr: "invoice.status == 'open'"
+
+  AT-002:
+    title: 全額消込で自動クローズ
+    verifies: [COND-002-1]
+    given:
+      customer: { id: "CUST-001", name: "株式会社テスト" }
+      invoice: { id: "INV-001", customer_id: "CUST-001", amount: 100000, status: "open" }
+      payment: { id: "PAY-001", customer_id: "CUST-001", amount: 100000 }
+      allocation: []
+    when:
+      call: allocate_payment
+      input: { invoice_id: "INV-001", payment_id: "PAY-001", amount: 100000 }
+    then:
+      success: true
+      assert:
+        - expr:
+            eq:
+              - { call: remaining, args: [invoice] }
+              - 0
+        - expr: "invoice.status == 'closed'"
+
+  AT-003:
+    title: 残額超過でエラー
+    verifies: [COND-003-1]
+    given:
+      customer: { id: "CUST-001", name: "株式会社テスト" }
+      invoice: { id: "INV-001", customer_id: "CUST-001", amount: 100000, status: "open" }
+      payment: { id: "PAY-001", customer_id: "CUST-001", amount: 150000 }
+      allocation: []
+    when:
+      call: allocate_payment
+      input: { invoice_id: "INV-001", payment_id: "PAY-001", amount: 120000 }
+    then:
+      error: OVER_ALLOCATION
+
+  AT-004:
+    title: 顧客不一致でエラー
+    verifies: [COND-004-1]
+    given:
+      customer: { id: "CUST-001", name: "株式会社A" }
+      invoice: { id: "INV-001", customer_id: "CUST-001", amount: 100000, status: "open" }
+      payment: { id: "PAY-001", customer_id: "CUST-002", amount: 100000 }
+      allocation: []
+    when:
+      call: allocate_payment
+      input: { invoice_id: "INV-001", payment_id: "PAY-001", amount: 100000 }
+    then:
+      error: CUSTOMER_MISMATCH
+
+  AT-005:
+    title: 消込取り消しで残額が復活
+    verifies: [COND-005-1]
+    given:
+      customer: { id: "CUST-001", name: "株式会社テスト" }
+      invoice: { id: "INV-001", customer_id: "CUST-001", amount: 100000, status: "closed" }
+      payment: { id: "PAY-001", customer_id: "CUST-001", amount: 100000 }
+      allocation:
+        - { id: "ALLOC-001", invoice_id: "INV-001", payment_id: "PAY-001", amount: 100000, status: "active" }
+    when:
+      call: cancel_allocation
+      input: { allocation_id: "ALLOC-001" }
+    then:
+      success: true
+      assert:
+        - expr:
+            eq:
+              - { call: remaining, args: [invoice] }
+              - 100000
+        - expr: "invoice.status == 'open'"
+
+# ============================================
+# 不変条件
+# ============================================
+invariants:
+  - id: INV-001
+    expr:
+      ge:
+        - { call: remaining, args: [self] }
+        - 0
+    description: "残額は常に0以上"
+  - id: INV-002
+    expr:
+      ge:
+        - { call: payment_remaining, args: [self] }
+        - 0
+    description: "入金の未消込残額は常に0以上"

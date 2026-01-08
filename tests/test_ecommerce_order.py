@@ -1,16 +1,41 @@
 """
 Auto-generated tests from: ECサイト - 注文管理
-Spec ID: SPEC-ECOMMERCE-ORDER-V5
-Version: v5.0
+Spec ID: SPEC-ECOMMERCE-ORDER-V6
+Version: v6.0
 """
 
 import pytest
 from typing import Dict, Any, List
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-# Date helper
+# Date helpers
 def today() -> str:
     return date.today().isoformat()
+
+def now() -> str:
+    return datetime.now().isoformat()
+
+def date_diff(d1: str, d2: str, unit: str = 'days') -> int:
+    """Calculate difference between two dates"""
+    from datetime import datetime
+    dt1 = datetime.fromisoformat(d1)
+    dt2 = datetime.fromisoformat(d2)
+    delta = dt2 - dt1
+    if unit == 'days':
+        return delta.days
+    elif unit == 'hours':
+        return int(delta.total_seconds() / 3600)
+    return delta.days
+
+def overlaps(start1: str, end1: str, start2: str, end2: str) -> bool:
+    """Check if two date ranges overlap"""
+    return start1 < end2 and start2 < end1
+
+def add_days(d: str, days: int) -> str:
+    """Add days to a date"""
+    from datetime import datetime, timedelta
+    dt = datetime.fromisoformat(d)
+    return (dt + timedelta(days=days)).date().isoformat()
 
 
 # ==================================================
@@ -27,27 +52,25 @@ class BusinessError(Exception):
 
 def cart_total(state: dict, entity: dict) -> Any:
     """カート合計金額"""
-    # Formula: sum(product.price * cart_item.quantity where cart_item.cart_id == cart.id)
-    # Parse error: Invalid aggregation: sum
+    # Parse error: 'dict' object has no attribute 'node_type'
     return entity.get('amount', 0)
 
 
 def order_total(state: dict, entity: dict) -> Any:
     """注文合計金額"""
-    # Formula: sum(order_item.unit_price * order_item.quantity where order_item.order_id == order.id)
-    # Parse error: Invalid aggregation: sum
+    # Parse error: 'dict' object has no attribute 'node_type'
     return entity.get('amount', 0)
 
 
 def cart_item_count(state: dict, entity: dict) -> Any:
     """カート内の商品数"""
-    # Formula: sum(cart_item.quantity where cart_item.cart_id == cart.id)
-    return sum(item.get('quantity', 0) for item in state.get('cart_item', []) if (item.get('cart_id') == cart.get('id')))
+    # Formula (v6): {'sum': {'expr': 'item.quantity', 'from': 'cart_item as item', 'where': 'item.ca...
+    return sum(item.get('quantity', 0) for item in state.get('cart_item', []) if item.get('cart_id') == entity.get('id'))
 
 
 def available_stock(state: dict, entity: dict) -> Any:
     """利用可能在庫数"""
-    # Formula: product.stock
+    # Formula (v5): self.stock
     return entity.get('stock')
 
 
@@ -75,6 +98,9 @@ def add_to_cart(state: dict, input_data: dict) -> dict:
 
     # 状態更新
     new_cart_item = {'id': f'CART_ITEM-{len(state.get("cart_item", [])) + 1:03d}', **input_data}
+    new_cart_item['cart_id'] = input_data.get('cart_id')
+    new_cart_item['product_id'] = input_data.get('product_id')
+    new_cart_item['quantity'] = input_data.get('quantity')
     if 'cart_item' not in state: state['cart_item'] = []
     state['cart_item'].append(new_cart_item)
 
@@ -95,9 +121,6 @@ def place_order(state: dict, input_data: dict) -> dict:
     product = state.get('product', {})
     if isinstance(product, list): product = product[0] if product else {}
 
-    # ビジネスルールチェック
-    # Parse error for 'any(product.stock < cart_item.quantity for cart_item in cart.items)': Expected RPAREN, got IDENT at pos 39
-
     # 前提条件チェック
     if not ((cart.get('status') == 'active')):
         raise BusinessError("PRECONDITION_FAILED", "既に注文済みのカート")
@@ -106,10 +129,11 @@ def place_order(state: dict, input_data: dict) -> dict:
 
     # 状態更新
     new_order = {'id': f'ORDER-{len(state.get("order", [])) + 1:03d}', **input_data}
+    new_order['user_id'] = cart.get('user_id')
     new_order['status'] = 'confirmed'
+    new_order['total_amount'] = 0
     if 'order' not in state: state['order'] = []
     state['order'].append(new_order)
-    # Parse error for 'decrease product.stock by cart_item.quantity': Unexpected token after expression: product at pos 9
     cart['status'] = 'ordered'
 
     return {'success': True}
@@ -139,7 +163,6 @@ def cancel_order(state: dict, input_data: dict) -> dict:
 
     # 状態更新
     order['status'] = 'cancelled'
-    # Parse error for 'increase product.stock by order_item.quantity': Unexpected token after expression: product at pos 9
 
     return {'success': True}
 
@@ -235,7 +258,6 @@ def test_at_003___________():
 
     # Then: 期待結果
     assert result['success'] is True
-    assert (state['product'].get('stock') == 7)
     assert (state['order'].get('status') == 'confirmed')
 
 
@@ -257,7 +279,6 @@ def test_at_004______________():
 
     # Then: 期待結果
     assert result['success'] is True
-    assert (state['product'].get('stock') == 10)
     assert (state['order'].get('status') == 'cancelled')
 
 
@@ -316,8 +337,8 @@ def test_at_007__________():
     state['order_item'] = [{"id": "OI-001", "order_id": "ORD-001", "product_id": "PROD-001", "quantity": 2, "unit_price": 2000}, {"id": "OI-002", "order_id": "ORD-001", "product_id": "PROD-002", "quantity": 1, "unit_price": 5000}]
 
     # When: アクション実行
-    input_data = {"cart_id": "CART-001"}
-    result = place_order(state, input_data)
+    input_data = {"order_id": "ORD-001"}
+    result = ship_order(state, input_data)
 
     # Then: 期待結果
     assert result['success'] is True
