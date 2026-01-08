@@ -1,0 +1,1085 @@
+{
+  "meta": {
+    "id": "edge-cases",
+    "title": "エッジケース検証",
+    "version": "0.1.0"
+  },
+  "state": {
+    "customer": {
+      "description": "顧客",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "tier": {
+          "type": {
+            "enum": [
+              "bronze",
+              "silver",
+              "gold",
+              "platinum"
+            ]
+          },
+          "required": true
+        },
+        "credit_limit": {
+          "type": "int",
+          "required": true
+        },
+        "created_at": {
+          "type": "datetime",
+          "required": true
+        }
+      }
+    },
+    "order": {
+      "description": "注文",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "customer_id": {
+          "type": {
+            "ref": "customer"
+          },
+          "required": true
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "draft",
+              "pending",
+              "confirmed",
+              "shipped",
+              "delivered",
+              "cancelled"
+            ]
+          },
+          "required": true
+        },
+        "total_amount": {
+          "type": "int",
+          "required": true
+        },
+        "discount_rate": {
+          "type": "float",
+          "required": false
+        },
+        "ordered_at": {
+          "type": "datetime",
+          "required": false
+        },
+        "shipped_at": {
+          "type": "datetime",
+          "required": false
+        },
+        "delivered_at": {
+          "type": "datetime",
+          "required": false
+        }
+      }
+    },
+    "order_item": {
+      "description": "注文明細",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "order_id": {
+          "type": {
+            "ref": "order"
+          },
+          "required": true
+        },
+        "product_id": {
+          "type": {
+            "ref": "product"
+          },
+          "required": true
+        },
+        "quantity": {
+          "type": "int",
+          "required": true
+        },
+        "unit_price": {
+          "type": "int",
+          "required": true
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "active",
+              "cancelled"
+            ]
+          },
+          "required": true
+        }
+      }
+    },
+    "product": {
+      "description": "商品",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "price": {
+          "type": "int",
+          "required": true
+        },
+        "stock": {
+          "type": "int",
+          "required": true
+        },
+        "category": {
+          "type": "string",
+          "required": true
+        },
+        "is_active": {
+          "type": "bool",
+          "required": true
+        }
+      }
+    }
+  },
+  "derived": {
+    "order_subtotal": {
+      "entity": "order",
+      "description": "注文小計（明細合計）",
+      "returns": "int",
+      "formula": {
+        "type": "agg",
+        "op": "sum",
+        "from": "order_item",
+        "as": "item",
+        "expr": {
+          "type": "binary",
+          "op": "mul",
+          "left": {
+            "type": "ref",
+            "path": "item.quantity"
+          },
+          "right": {
+            "type": "ref",
+            "path": "item.unit_price"
+          }
+        },
+        "where": {
+          "type": "binary",
+          "op": "and",
+          "left": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "item.order_id"
+            },
+            "right": {
+              "type": "self",
+              "field": "id"
+            }
+          },
+          "right": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "item.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "active"
+            }
+          }
+        }
+      }
+    },
+    "order_discount_amount": {
+      "entity": "order",
+      "description": "割引額（CASE式：顧客ティアによる）",
+      "returns": "int",
+      "formula": {
+        "type": "case",
+        "branches": [
+          {
+            "when": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "order.customer.tier"
+              },
+              "right": {
+                "type": "literal",
+                "value": "platinum"
+              }
+            },
+            "then": {
+              "type": "binary",
+              "op": "mul",
+              "left": {
+                "type": "call",
+                "name": "order_subtotal",
+                "args": [
+                  {
+                    "type": "self",
+                    "field": ""
+                  }
+                ]
+              },
+              "right": {
+                "type": "literal",
+                "value": 0.2
+              }
+            }
+          },
+          {
+            "when": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "order.customer.tier"
+              },
+              "right": {
+                "type": "literal",
+                "value": "gold"
+              }
+            },
+            "then": {
+              "type": "binary",
+              "op": "mul",
+              "left": {
+                "type": "call",
+                "name": "order_subtotal",
+                "args": [
+                  {
+                    "type": "self",
+                    "field": ""
+                  }
+                ]
+              },
+              "right": {
+                "type": "literal",
+                "value": 0.15
+              }
+            }
+          },
+          {
+            "when": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "order.customer.tier"
+              },
+              "right": {
+                "type": "literal",
+                "value": "silver"
+              }
+            },
+            "then": {
+              "type": "binary",
+              "op": "mul",
+              "left": {
+                "type": "call",
+                "name": "order_subtotal",
+                "args": [
+                  {
+                    "type": "self",
+                    "field": ""
+                  }
+                ]
+              },
+              "right": {
+                "type": "literal",
+                "value": 0.1
+              }
+            }
+          }
+        ],
+        "else": {
+          "type": "literal",
+          "value": 0
+        }
+      }
+    },
+    "order_final_amount": {
+      "entity": "order",
+      "description": "最終金額（小計 - 割引）",
+      "returns": "int",
+      "formula": {
+        "type": "binary",
+        "op": "sub",
+        "left": {
+          "type": "call",
+          "name": "order_subtotal",
+          "args": [
+            {
+              "type": "self",
+              "field": ""
+            }
+          ]
+        },
+        "right": {
+          "type": "call",
+          "name": "order_discount_amount",
+          "args": [
+            {
+              "type": "self",
+              "field": ""
+            }
+          ]
+        }
+      }
+    },
+    "customer_total_orders": {
+      "entity": "customer",
+      "description": "顧客の注文総数",
+      "returns": "int",
+      "formula": {
+        "type": "agg",
+        "op": "count",
+        "from": "order",
+        "where": {
+          "type": "binary",
+          "op": "and",
+          "left": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "item.customer_id"
+            },
+            "right": {
+              "type": "self",
+              "field": "id"
+            }
+          },
+          "right": {
+            "type": "binary",
+            "op": "ne",
+            "left": {
+              "type": "ref",
+              "path": "item.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "cancelled"
+            }
+          }
+        }
+      }
+    },
+    "customer_total_spent": {
+      "entity": "customer",
+      "description": "顧客の累計購入額（3段ネスト：顧客→注文→derived）",
+      "returns": "int",
+      "formula": {
+        "type": "agg",
+        "op": "sum",
+        "from": "order",
+        "as": "o",
+        "expr": {
+          "type": "call",
+          "name": "order_final_amount",
+          "args": [
+            {
+              "type": "ref",
+              "path": "o"
+            }
+          ]
+        },
+        "where": {
+          "type": "binary",
+          "op": "and",
+          "left": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "o.customer_id"
+            },
+            "right": {
+              "type": "self",
+              "field": "id"
+            }
+          },
+          "right": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "o.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "delivered"
+            }
+          }
+        }
+      }
+    },
+    "customer_available_credit": {
+      "entity": "customer",
+      "description": "利用可能与信枠（与信限度額 - 未払い注文額）",
+      "returns": "int",
+      "formula": {
+        "type": "binary",
+        "op": "sub",
+        "left": {
+          "type": "self",
+          "field": "credit_limit"
+        },
+        "right": {
+          "type": "agg",
+          "op": "sum",
+          "from": "order",
+          "as": "o",
+          "expr": {
+            "type": "call",
+            "name": "order_final_amount",
+            "args": [
+              {
+                "type": "ref",
+                "path": "o"
+              }
+            ]
+          },
+          "where": {
+            "type": "binary",
+            "op": "and",
+            "left": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "o.customer_id"
+              },
+              "right": {
+                "type": "self",
+                "field": "id"
+              }
+            },
+            "right": {
+              "type": "binary",
+              "op": "in",
+              "left": {
+                "type": "ref",
+                "path": "o.status"
+              },
+              "right": {
+                "type": "literal",
+                "value": [
+                  "pending",
+                  "confirmed",
+                  "shipped"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "days_since_order": {
+      "entity": "order",
+      "description": "注文からの経過日数",
+      "returns": "int",
+      "formula": {
+        "type": "if",
+        "cond": {
+          "type": "unary",
+          "op": "is_not_null",
+          "expr": {
+            "type": "self",
+            "field": "ordered_at"
+          }
+        },
+        "then": {
+          "type": "date",
+          "op": "diff",
+          "args": [
+            {
+              "type": "date",
+              "op": "today"
+            },
+            {
+              "type": "self",
+              "field": "ordered_at"
+            }
+          ],
+          "unit": "days"
+        },
+        "else": {
+          "type": "literal",
+          "value": 0
+        }
+      }
+    },
+    "shipping_days": {
+      "entity": "order",
+      "description": "発送から配達までの日数",
+      "returns": "int",
+      "formula": {
+        "type": "if",
+        "cond": {
+          "type": "binary",
+          "op": "and",
+          "left": {
+            "type": "unary",
+            "op": "is_not_null",
+            "expr": {
+              "type": "self",
+              "field": "shipped_at"
+            }
+          },
+          "right": {
+            "type": "unary",
+            "op": "is_not_null",
+            "expr": {
+              "type": "self",
+              "field": "delivered_at"
+            }
+          }
+        },
+        "then": {
+          "type": "date",
+          "op": "diff",
+          "args": [
+            {
+              "type": "self",
+              "field": "delivered_at"
+            },
+            {
+              "type": "self",
+              "field": "shipped_at"
+            }
+          ],
+          "unit": "days"
+        },
+        "else": {
+          "type": "literal",
+          "value": null
+        }
+      }
+    }
+  },
+  "functions": {
+    "place_order": {
+      "description": "注文確定",
+      "input": {
+        "order_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "order.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "draft"
+            }
+          },
+          "entity": "order",
+          "reason": "下書き状態の注文のみ確定可能"
+        },
+        {
+          "expr": {
+            "type": "binary",
+            "op": "gt",
+            "left": {
+              "type": "agg",
+              "op": "count",
+              "from": "order_item",
+              "where": {
+                "type": "binary",
+                "op": "and",
+                "left": {
+                  "type": "binary",
+                  "op": "eq",
+                  "left": {
+                    "type": "ref",
+                    "path": "item.order_id"
+                  },
+                  "right": {
+                    "type": "input",
+                    "name": "order_id"
+                  }
+                },
+                "right": {
+                  "type": "binary",
+                  "op": "eq",
+                  "left": {
+                    "type": "ref",
+                    "path": "item.status"
+                  },
+                  "right": {
+                    "type": "literal",
+                    "value": "active"
+                  }
+                }
+              }
+            },
+            "right": {
+              "type": "literal",
+              "value": 0
+            }
+          },
+          "reason": "明細が1件以上必要"
+        }
+      ],
+      "error": [
+        {
+          "code": "EXCEEDS_CREDIT_LIMIT",
+          "when": {
+            "type": "binary",
+            "op": "lt",
+            "left": {
+              "type": "call",
+              "name": "customer_available_credit",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "order.customer"
+                }
+              ]
+            },
+            "right": {
+              "type": "call",
+              "name": "order_final_amount",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "order"
+                }
+              ]
+            }
+          },
+          "reason": "与信枠を超過",
+          "http_status": 409
+        },
+        {
+          "code": "INSUFFICIENT_STOCK",
+          "when": {
+            "type": "agg",
+            "op": "exists",
+            "from": "order_item",
+            "as": "item",
+            "where": {
+              "type": "binary",
+              "op": "and",
+              "left": {
+                "type": "binary",
+                "op": "eq",
+                "left": {
+                  "type": "ref",
+                  "path": "item.order_id"
+                },
+                "right": {
+                  "type": "input",
+                  "name": "order_id"
+                }
+              },
+              "right": {
+                "type": "binary",
+                "op": "gt",
+                "left": {
+                  "type": "ref",
+                  "path": "item.quantity"
+                },
+                "right": {
+                  "type": "ref",
+                  "path": "item.product.stock"
+                }
+              }
+            }
+          },
+          "reason": "在庫不足の商品あり",
+          "http_status": 409
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "order",
+            "set": {
+              "status": {
+                "type": "literal",
+                "value": "pending"
+              },
+              "ordered_at": {
+                "type": "date",
+                "op": "now"
+              }
+            }
+          },
+          "reason": "注文ステータスを更新"
+        }
+      ]
+    },
+    "cancel_order_item": {
+      "description": "注文明細のキャンセル",
+      "input": {
+        "order_item_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "in",
+            "left": {
+              "type": "ref",
+              "path": "order_item.order.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": [
+                "draft",
+                "pending"
+              ]
+            }
+          },
+          "entity": "order_item",
+          "reason": "下書きまたは保留中の注文のみキャンセル可能"
+        }
+      ],
+      "error": [
+        {
+          "code": "LAST_ITEM",
+          "when": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "agg",
+              "op": "count",
+              "from": "order_item",
+              "where": {
+                "type": "binary",
+                "op": "and",
+                "left": {
+                  "type": "binary",
+                  "op": "eq",
+                  "left": {
+                    "type": "ref",
+                    "path": "item.order_id"
+                  },
+                  "right": {
+                    "type": "ref",
+                    "path": "order_item.order_id"
+                  }
+                },
+                "right": {
+                  "type": "binary",
+                  "op": "eq",
+                  "left": {
+                    "type": "ref",
+                    "path": "item.status"
+                  },
+                  "right": {
+                    "type": "literal",
+                    "value": "active"
+                  }
+                }
+              }
+            },
+            "right": {
+              "type": "literal",
+              "value": 1
+            }
+          },
+          "reason": "最後の明細はキャンセル不可（注文全体をキャンセルしてください）",
+          "http_status": 409
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "order_item",
+            "set": {
+              "status": {
+                "type": "literal",
+                "value": "cancelled"
+              }
+            }
+          },
+          "reason": "明細ステータスをキャンセルに変更"
+        }
+      ]
+    }
+  },
+  "scenarios": {
+    "AT-EC-001": {
+      "title": "ゴールド顧客は15%割引される",
+      "given": {
+        "customer": {
+          "id": "CUST-001",
+          "name": "ゴールド顧客",
+          "tier": "gold",
+          "credit_limit": 1000000,
+          "created_at": "2024-01-01T00:00:00Z"
+        },
+        "product": {
+          "id": "PROD-001",
+          "name": "商品A",
+          "price": 10000,
+          "stock": 100,
+          "category": "electronics",
+          "is_active": true
+        },
+        "order": {
+          "id": "ORD-001",
+          "customer_id": "CUST-001",
+          "status": "draft",
+          "total_amount": 0
+        },
+        "order_item": [
+          {
+            "id": "ITEM-001",
+            "order_id": "ORD-001",
+            "product_id": "PROD-001",
+            "quantity": 2,
+            "unit_price": 10000,
+            "status": "active"
+          }
+        ]
+      },
+      "when": {
+        "call": "place_order",
+        "input": {
+          "order_id": "ORD-001"
+        }
+      },
+      "then": {
+        "success": true,
+        "assert": [
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "call",
+              "name": "order_subtotal",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "order"
+                }
+              ]
+            },
+            "right": {
+              "type": "literal",
+              "value": 20000
+            }
+          },
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "call",
+              "name": "order_discount_amount",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "order"
+                }
+              ]
+            },
+            "right": {
+              "type": "literal",
+              "value": 3000
+            }
+          },
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "call",
+              "name": "order_final_amount",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "order"
+                }
+              ]
+            },
+            "right": {
+              "type": "literal",
+              "value": 17000
+            }
+          }
+        ]
+      }
+    },
+    "AT-EC-002": {
+      "title": "与信枠超過でエラー",
+      "given": {
+        "customer": {
+          "id": "CUST-001",
+          "name": "低与信顧客",
+          "tier": "bronze",
+          "credit_limit": 10000,
+          "created_at": "2024-01-01T00:00:00Z"
+        },
+        "product": {
+          "id": "PROD-001",
+          "name": "高額商品",
+          "price": 50000,
+          "stock": 100,
+          "category": "electronics",
+          "is_active": true
+        },
+        "order": {
+          "id": "ORD-001",
+          "customer_id": "CUST-001",
+          "status": "draft",
+          "total_amount": 0
+        },
+        "order_item": [
+          {
+            "id": "ITEM-001",
+            "order_id": "ORD-001",
+            "product_id": "PROD-001",
+            "quantity": 1,
+            "unit_price": 50000,
+            "status": "active"
+          }
+        ]
+      },
+      "when": {
+        "call": "place_order",
+        "input": {
+          "order_id": "ORD-001"
+        }
+      },
+      "then": {
+        "success": false,
+        "error": "EXCEEDS_CREDIT_LIMIT"
+      }
+    },
+    "AT-EC-003": {
+      "title": "在庫不足でエラー",
+      "given": {
+        "customer": {
+          "id": "CUST-001",
+          "name": "テスト顧客",
+          "tier": "gold",
+          "credit_limit": 1000000,
+          "created_at": "2024-01-01T00:00:00Z"
+        },
+        "product": {
+          "id": "PROD-001",
+          "name": "在庫僅少商品",
+          "price": 1000,
+          "stock": 5,
+          "category": "electronics",
+          "is_active": true
+        },
+        "order": {
+          "id": "ORD-001",
+          "customer_id": "CUST-001",
+          "status": "draft",
+          "total_amount": 0
+        },
+        "order_item": [
+          {
+            "id": "ITEM-001",
+            "order_id": "ORD-001",
+            "product_id": "PROD-001",
+            "quantity": 10,
+            "unit_price": 1000,
+            "status": "active"
+          }
+        ]
+      },
+      "when": {
+        "call": "place_order",
+        "input": {
+          "order_id": "ORD-001"
+        }
+      },
+      "then": {
+        "success": false,
+        "error": "INSUFFICIENT_STOCK"
+      }
+    }
+  },
+  "invariants": [
+    {
+      "id": "INV-EC-001",
+      "entity": "order",
+      "expr": {
+        "type": "binary",
+        "op": "ge",
+        "left": {
+          "type": "call",
+          "name": "order_final_amount",
+          "args": [
+            {
+              "type": "self",
+              "field": ""
+            }
+          ]
+        },
+        "right": {
+          "type": "literal",
+          "value": 0
+        }
+      },
+      "description": "最終金額は常に0以上"
+    },
+    {
+      "id": "INV-EC-002",
+      "entity": "order_item",
+      "expr": {
+        "type": "binary",
+        "op": "gt",
+        "left": {
+          "type": "self",
+          "field": "quantity"
+        },
+        "right": {
+          "type": "literal",
+          "value": 0
+        }
+      },
+      "description": "数量は常に1以上"
+    },
+    {
+      "id": "INV-EC-003",
+      "entity": "customer",
+      "expr": {
+        "type": "binary",
+        "op": "ge",
+        "left": {
+          "type": "self",
+          "field": "credit_limit"
+        },
+        "right": {
+          "type": "literal",
+          "value": 0
+        }
+      },
+      "description": "与信限度額は常に0以上"
+    }
+  ]
+}

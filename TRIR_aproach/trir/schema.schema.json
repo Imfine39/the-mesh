@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://the-mesh.dev/schemas/trir/schema.schema.json",
+  "title": "TRIR Schema Definition",
+  "description": "Typed Relational IR - Schema for entities, functions, and specifications",
+
+  "$defs": {
+    "FieldType": {
+      "description": "Field type definition",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["string", "int", "float", "bool", "datetime", "text"]
+        },
+        { "$ref": "#/$defs/EnumType" },
+        { "$ref": "#/$defs/ListType" },
+        { "$ref": "#/$defs/RefType" }
+      ]
+    },
+
+    "EnumType": {
+      "type": "object",
+      "properties": {
+        "enum": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": ["enum"],
+      "additionalProperties": false
+    },
+
+    "ListType": {
+      "type": "object",
+      "properties": {
+        "list": { "$ref": "#/$defs/FieldType" }
+      },
+      "required": ["list"],
+      "additionalProperties": false
+    },
+
+    "RefType": {
+      "description": "Foreign key reference to another entity",
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string",
+          "description": "Target entity name"
+        },
+        "field": {
+          "type": "string",
+          "default": "id",
+          "description": "Target field (default: id)"
+        },
+        "on_delete": {
+          "type": "string",
+          "enum": ["cascade", "restrict", "set_null", "no_action"],
+          "default": "restrict"
+        }
+      },
+      "required": ["ref"],
+      "additionalProperties": false
+    },
+
+    "Field": {
+      "type": "object",
+      "properties": {
+        "type": { "$ref": "#/$defs/FieldType" },
+        "required": { "type": "boolean", "default": true },
+        "unique": { "type": "boolean", "default": false },
+        "default": {},
+        "description": { "type": "string" }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+
+    "Entity": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "fields": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Field" }
+        },
+        "indexes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Index" }
+        }
+      },
+      "required": ["fields"],
+      "additionalProperties": false
+    },
+
+    "Index": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "unique": { "type": "boolean", "default": false }
+      },
+      "required": ["fields"],
+      "additionalProperties": false
+    },
+
+    "DerivedFormula": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "entity": {
+          "type": "string",
+          "description": "Entity this formula applies to"
+        },
+        "formula": {
+          "$ref": "expression.schema.json",
+          "description": "The formula expression"
+        },
+        "returns": { "$ref": "#/$defs/FieldType" }
+      },
+      "required": ["entity", "formula"],
+      "additionalProperties": false
+    },
+
+    "Condition": {
+      "type": "object",
+      "properties": {
+        "expr": { "$ref": "expression.schema.json" },
+        "entity": {
+          "type": "string",
+          "description": "Entity context for the condition"
+        },
+        "reason": { "type": "string" }
+      },
+      "required": ["expr"],
+      "additionalProperties": false
+    },
+
+    "ErrorDef": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "when": { "$ref": "expression.schema.json" },
+        "reason": { "type": "string" },
+        "http_status": {
+          "type": "integer",
+          "default": 409
+        }
+      },
+      "required": ["code", "when"],
+      "additionalProperties": false
+    },
+
+    "Action": {
+      "oneOf": [
+        { "$ref": "#/$defs/CreateAction" },
+        { "$ref": "#/$defs/UpdateAction" },
+        { "$ref": "#/$defs/DeleteAction" }
+      ]
+    },
+
+    "CreateAction": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "string", "description": "Entity to create" },
+        "with": {
+          "type": "object",
+          "additionalProperties": { "$ref": "expression.schema.json" }
+        }
+      },
+      "required": ["create", "with"],
+      "additionalProperties": false
+    },
+
+    "UpdateAction": {
+      "type": "object",
+      "properties": {
+        "update": { "type": "string", "description": "Entity to update" },
+        "target": {
+          "$ref": "expression.schema.json",
+          "description": "Expression to identify target entity"
+        },
+        "set": {
+          "type": "object",
+          "additionalProperties": { "$ref": "expression.schema.json" }
+        }
+      },
+      "required": ["update", "set"],
+      "additionalProperties": false
+    },
+
+    "DeleteAction": {
+      "type": "object",
+      "properties": {
+        "delete": { "type": "string", "description": "Entity to delete" },
+        "where": { "$ref": "expression.schema.json" }
+      },
+      "required": ["delete", "where"],
+      "additionalProperties": false
+    },
+
+    "PostAction": {
+      "type": "object",
+      "properties": {
+        "action": { "$ref": "#/$defs/Action" },
+        "condition": {
+          "$ref": "expression.schema.json",
+          "description": "Optional condition for this action"
+        },
+        "reason": { "type": "string" }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+
+    "Function": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "implements": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Requirement IDs this function implements"
+        },
+        "input": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Field" }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Field" }
+        },
+        "pre": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Condition" }
+        },
+        "error": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ErrorDef" }
+        },
+        "post": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PostAction" }
+        }
+      },
+      "required": ["input"],
+      "additionalProperties": false
+    },
+
+    "ScenarioData": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "object" },
+          { "type": "array", "items": { "type": "object" } }
+        ]
+      }
+    },
+
+    "Scenario": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "verifies": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Condition IDs this scenario verifies"
+        },
+        "given": { "$ref": "#/$defs/ScenarioData" },
+        "when": {
+          "type": "object",
+          "properties": {
+            "call": { "type": "string" },
+            "input": { "type": "object" }
+          },
+          "required": ["call", "input"]
+        },
+        "then": {
+          "type": "object",
+          "properties": {
+            "success": { "type": "boolean" },
+            "error": { "type": "string" },
+            "assert": {
+              "type": "array",
+              "items": { "$ref": "expression.schema.json" }
+            }
+          }
+        }
+      },
+      "required": ["title", "given", "when", "then"],
+      "additionalProperties": false
+    },
+
+    "Invariant": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "entity": { "type": "string" },
+        "expr": { "$ref": "expression.schema.json" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "entity", "expr"],
+      "additionalProperties": false
+    },
+
+    "Requirement": {
+      "type": "object",
+      "properties": {
+        "who": { "type": "string" },
+        "why": { "type": "string" },
+        "what": { "type": "string" },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "description": { "type": "string" },
+              "acceptance": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["id", "description"]
+          }
+        }
+      },
+      "required": ["who", "why", "what"],
+      "additionalProperties": false
+    }
+  },
+
+  "type": "object",
+  "properties": {
+    "meta": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "version": { "type": "string" },
+        "domain": { "type": "string" }
+      },
+      "required": ["id", "title", "version"]
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Requirement" }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Entity" }
+    },
+    "derived": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/DerivedFormula" }
+    },
+    "functions": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Function" }
+    },
+    "scenarios": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Scenario" }
+    },
+    "invariants": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Invariant" }
+    }
+  },
+  "required": ["meta", "state"],
+  "additionalProperties": false
+}

@@ -1,0 +1,251 @@
+{
+  "test_cases": [
+    {
+      "name": "missing_entity_reference",
+      "description": "存在しないEntityへのFK参照",
+      "expected_error": "Referenced entity 'nonexistent' does not exist",
+      "spec": {
+        "meta": { "id": "test", "title": "Test", "version": "0.1.0" },
+        "state": {
+          "order": {
+            "fields": {
+              "id": { "type": "string", "required": true },
+              "customer_id": { "type": { "ref": "nonexistent" }, "required": true }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "missing_field_reference",
+      "description": "存在しないフィールドへの参照",
+      "expected_error": "Unknown entity or alias",
+      "spec": {
+        "meta": { "id": "test", "title": "Test", "version": "0.1.0" },
+        "state": {
+          "order": {
+            "fields": {
+              "id": { "type": "string", "required": true },
+              "amount": { "type": "int", "required": true }
+            }
+          }
+        },
+        "derived": {
+          "test_derived": {
+            "entity": "order",
+            "formula": {
+              "type": "binary",
+              "op": "add",
+              "left": { "type": "self", "field": "amount" },
+              "right": { "type": "ref", "path": "nonexistent_entity.field" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "circular_dependency",
+      "description": "derived間の循環依存",
+      "expected_error": "Circular dependency detected",
+      "spec": {
+        "meta": { "id": "test", "title": "Test", "version": "0.1.0" },
+        "state": {
+          "item": {
+            "fields": {
+              "id": { "type": "string", "required": true },
+              "value": { "type": "int", "required": true }
+            }
+          }
+        },
+        "derived": {
+          "calc_a": {
+            "entity": "item",
+            "formula": {
+              "type": "binary",
+              "op": "add",
+              "left": { "type": "self", "field": "value" },
+              "right": { "type": "call", "name": "calc_b", "args": [{ "type": "self", "field": "" }] }
+            }
+          },
+          "calc_b": {
+            "entity": "item",
+            "formula": {
+              "type": "binary",
+              "op": "mul",
+              "left": { "type": "self", "field": "value" },
+              "right": { "type": "call", "name": "calc_c", "args": [{ "type": "self", "field": "" }] }
+            }
+          },
+          "calc_c": {
+            "entity": "item",
+            "formula": {
+              "type": "binary",
+              "op": "sub",
+              "left": { "type": "self", "field": "value" },
+              "right": { "type": "call", "name": "calc_a", "args": [{ "type": "self", "field": "" }] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "unknown_function_call",
+      "description": "存在しないderivedの呼び出し",
+      "expected_error": "Unknown function 'nonexistent_func'",
+      "spec": {
+        "meta": { "id": "test", "title": "Test", "version": "0.1.0" },
+        "state": {
+          "item": {
+            "fields": {
+              "id": { "type": "string", "required": true },
+              "value": { "type": "int", "required": true }
+            }
+          }
+        },
+        "derived": {
+          "test_derived": {
+            "entity": "item",
+            "formula": {
+              "type": "call",
+              "name": "nonexistent_func",
+              "args": [{ "type": "self", "field": "" }]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid_aggregation_entity",
+      "description": "存在しないEntityからの集計",
+      "expected_error": "Aggregation from unknown entity",
+      "spec": {
+        "meta": { "id": "test", "title": "Test", "version": "0.1.0" },
+        "state": {
+          "order": {
+            "fields": {
+              "id": { "type": "string", "required": true }
+            }
+          }
+        },
+        "derived": {
+          "total": {
+            "entity": "order",
+            "formula": {
+              "type": "agg",
+              "op": "sum",
+              "from": "nonexistent_items",
+              "expr": { "type": "ref", "path": "item.amount" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "post_action_unknown_entity",
+      "description": "post actionで存在しないEntityを操作",
+      "expected_error": "Referenced entity 'nonexistent' does not exist",
+      "spec": {
+        "meta": { "id": "test", "title": "Test", "version": "0.1.0" },
+        "state": {
+          "order": {
+            "fields": {
+              "id": { "type": "string", "required": true }
+            }
+          }
+        },
+        "functions": {
+          "test_func": {
+            "input": {
+              "order_id": { "type": "string", "required": true }
+            },
+            "post": [
+              {
+                "action": {
+                  "create": "nonexistent",
+                  "with": {
+                    "id": { "type": "literal", "value": "test" }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "derived_unknown_entity",
+      "description": "derivedで存在しないEntityを参照",
+      "expected_error": "Referenced entity 'nonexistent' does not exist",
+      "spec": {
+        "meta": { "id": "test", "title": "Test", "version": "0.1.0" },
+        "state": {
+          "order": {
+            "fields": {
+              "id": { "type": "string", "required": true }
+            }
+          }
+        },
+        "derived": {
+          "test_derived": {
+            "entity": "nonexistent",
+            "formula": { "type": "self", "field": "value" }
+          }
+        }
+      }
+    },
+    {
+      "name": "deep_nested_valid",
+      "description": "深いネストでも正常に動作する（エラーなし）",
+      "expected_error": null,
+      "spec": {
+        "meta": { "id": "test", "title": "Test", "version": "0.1.0" },
+        "state": {
+          "item": {
+            "fields": {
+              "id": { "type": "string", "required": true },
+              "a": { "type": "int", "required": true },
+              "b": { "type": "int", "required": true },
+              "c": { "type": "int", "required": true }
+            }
+          }
+        },
+        "derived": {
+          "complex_calc": {
+            "entity": "item",
+            "formula": {
+              "type": "binary",
+              "op": "add",
+              "left": {
+                "type": "binary",
+                "op": "mul",
+                "left": {
+                  "type": "binary",
+                  "op": "sub",
+                  "left": { "type": "self", "field": "a" },
+                  "right": { "type": "self", "field": "b" }
+                },
+                "right": { "type": "self", "field": "c" }
+              },
+              "right": {
+                "type": "if",
+                "cond": {
+                  "type": "binary",
+                  "op": "gt",
+                  "left": { "type": "self", "field": "a" },
+                  "right": { "type": "literal", "value": 100 }
+                },
+                "then": {
+                  "type": "binary",
+                  "op": "mul",
+                  "left": { "type": "self", "field": "a" },
+                  "right": { "type": "literal", "value": 2 }
+                },
+                "else": { "type": "self", "field": "a" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

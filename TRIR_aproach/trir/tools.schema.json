@@ -1,0 +1,390 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://the-mesh.dev/schemas/trir/tools.schema.json",
+  "title": "TRIR Tool Definitions",
+  "description": "Tool interfaces for AI to manipulate TRIR directly",
+
+  "$defs": {
+    "Expression": {
+      "$ref": "expression.schema.json"
+    },
+
+    "FieldType": {
+      "$ref": "schema.schema.json#/$defs/FieldType"
+    },
+
+    "ToolResult": {
+      "type": "object",
+      "properties": {
+        "success": { "type": "boolean" },
+        "id": { "type": "string", "description": "Created/updated resource ID" },
+        "error": { "type": "string" },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["success"]
+    }
+  },
+
+  "tools": {
+    "create_entity": {
+      "description": "Create a new entity (database table)",
+      "input": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "description": "Entity name (snake_case)"
+          },
+          "description": { "type": "string" },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "type": { "$ref": "#/$defs/FieldType" },
+                "required": { "type": "boolean", "default": true },
+                "unique": { "type": "boolean", "default": false },
+                "description": { "type": "string" }
+              },
+              "required": ["type"]
+            }
+          }
+        },
+        "required": ["name", "fields"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "add_field": {
+      "description": "Add a field to an existing entity",
+      "input": {
+        "type": "object",
+        "properties": {
+          "entity": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "$ref": "#/$defs/FieldType" },
+          "required": { "type": "boolean", "default": true },
+          "unique": { "type": "boolean", "default": false },
+          "description": { "type": "string" }
+        },
+        "required": ["entity", "name", "type"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "add_foreign_key": {
+      "description": "Add a foreign key reference between entities",
+      "input": {
+        "type": "object",
+        "properties": {
+          "entity": { "type": "string", "description": "Source entity" },
+          "field": { "type": "string", "description": "Field name (e.g., 'customer_id')" },
+          "references": { "type": "string", "description": "Target entity" },
+          "target_field": { "type": "string", "default": "id" },
+          "on_delete": {
+            "type": "string",
+            "enum": ["cascade", "restrict", "set_null", "no_action"],
+            "default": "restrict"
+          }
+        },
+        "required": ["entity", "field", "references"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "create_function": {
+      "description": "Create a new function (API endpoint)",
+      "input": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": { "type": "string" },
+          "implements": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Requirement IDs"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "type": { "$ref": "#/$defs/FieldType" },
+                "required": { "type": "boolean", "default": true },
+                "description": { "type": "string" }
+              },
+              "required": ["type"]
+            }
+          }
+        },
+        "required": ["name", "input"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "add_precondition": {
+      "description": "Add a precondition to a function",
+      "input": {
+        "type": "object",
+        "properties": {
+          "function": { "type": "string" },
+          "expr": { "$ref": "#/$defs/Expression" },
+          "entity": { "type": "string", "description": "Entity context" },
+          "reason": { "type": "string" }
+        },
+        "required": ["function", "expr"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "add_error_case": {
+      "description": "Add an error case to a function",
+      "input": {
+        "type": "object",
+        "properties": {
+          "function": { "type": "string" },
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "description": "Error code (UPPER_SNAKE_CASE)"
+          },
+          "when": { "$ref": "#/$defs/Expression" },
+          "reason": { "type": "string" },
+          "http_status": { "type": "integer", "default": 409 }
+        },
+        "required": ["function", "code", "when"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "add_post_action": {
+      "description": "Add a post-action to a function",
+      "input": {
+        "type": "object",
+        "properties": {
+          "function": { "type": "string" },
+          "action": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "create": { "type": "string" },
+                  "with": {
+                    "type": "object",
+                    "additionalProperties": { "$ref": "#/$defs/Expression" }
+                  }
+                },
+                "required": ["create", "with"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "update": { "type": "string" },
+                  "set": {
+                    "type": "object",
+                    "additionalProperties": { "$ref": "#/$defs/Expression" }
+                  }
+                },
+                "required": ["update", "set"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "delete": { "type": "string" },
+                  "where": { "$ref": "#/$defs/Expression" }
+                },
+                "required": ["delete", "where"]
+              }
+            ]
+          },
+          "condition": {
+            "$ref": "#/$defs/Expression",
+            "description": "Optional condition"
+          },
+          "reason": { "type": "string" }
+        },
+        "required": ["function", "action"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "create_derived": {
+      "description": "Create a derived formula (calculated field)",
+      "input": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "entity": { "type": "string", "description": "Entity this applies to" },
+          "formula": { "$ref": "#/$defs/Expression" },
+          "description": { "type": "string" },
+          "returns": { "$ref": "#/$defs/FieldType" }
+        },
+        "required": ["name", "entity", "formula"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "create_scenario": {
+      "description": "Create a test scenario",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^AT-[0-9]+$"
+          },
+          "title": { "type": "string" },
+          "verifies": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "given": {
+            "type": "object",
+            "description": "Initial state data"
+          },
+          "when": {
+            "type": "object",
+            "properties": {
+              "call": { "type": "string" },
+              "input": { "type": "object" }
+            },
+            "required": ["call", "input"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "success": { "type": "boolean" },
+              "error": { "type": "string" },
+              "assert": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/Expression" }
+              }
+            }
+          }
+        },
+        "required": ["id", "title", "given", "when", "then"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "create_invariant": {
+      "description": "Create an invariant (always-true constraint)",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^INV-[0-9]+$"
+          },
+          "entity": { "type": "string" },
+          "expr": { "$ref": "#/$defs/Expression" },
+          "description": { "type": "string" }
+        },
+        "required": ["id", "entity", "expr"]
+      },
+      "output": { "$ref": "#/$defs/ToolResult" }
+    },
+
+    "validate_spec": {
+      "description": "Validate the entire specification",
+      "input": {
+        "type": "object",
+        "properties": {
+          "check_references": { "type": "boolean", "default": true },
+          "check_types": { "type": "boolean", "default": true },
+          "check_cycles": { "type": "boolean", "default": true }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "valid": { "type": "boolean" },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string" },
+                "message": { "type": "string" },
+                "severity": { "type": "string", "enum": ["error", "warning"] }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "analyze_impact": {
+      "description": "Analyze impact of a change",
+      "input": {
+        "type": "object",
+        "properties": {
+          "change_type": {
+            "type": "string",
+            "enum": ["modify", "delete", "add"]
+          },
+          "target_type": {
+            "type": "string",
+            "enum": ["entity", "field", "function", "derived"]
+          },
+          "target_name": { "type": "string" }
+        },
+        "required": ["change_type", "target_type", "target_name"]
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "affected_entities": { "type": "array", "items": { "type": "string" } },
+          "affected_functions": { "type": "array", "items": { "type": "string" } },
+          "affected_derived": { "type": "array", "items": { "type": "string" } },
+          "affected_scenarios": { "type": "array", "items": { "type": "string" } },
+          "breaking_changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "target": { "type": "string" },
+                "reason": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "export_view": {
+      "description": "Export spec to human-readable format",
+      "input": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": ["yaml", "markdown", "openapi", "sql", "prisma"]
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["state", "derived", "functions", "scenarios", "requirements"]
+            }
+          }
+        },
+        "required": ["format"]
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "string" },
+          "format": { "type": "string" }
+        }
+      }
+    }
+  }
+}

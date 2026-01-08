@@ -1,0 +1,935 @@
+{
+  "meta": {
+    "id": "reservation-system",
+    "title": "予約システム",
+    "version": "0.1.0"
+  },
+  "state": {
+    "room": {
+      "description": "部屋",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "capacity": {
+          "type": "int",
+          "required": true
+        },
+        "hourly_rate": {
+          "type": "int",
+          "required": true
+        },
+        "is_available": {
+          "type": "bool",
+          "required": true
+        }
+      }
+    },
+    "reservation": {
+      "description": "予約",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "room_id": {
+          "type": {
+            "ref": "room"
+          },
+          "required": true
+        },
+        "user_id": {
+          "type": {
+            "ref": "user"
+          },
+          "required": true
+        },
+        "start_time": {
+          "type": "datetime",
+          "required": true
+        },
+        "end_time": {
+          "type": "datetime",
+          "required": true
+        },
+        "attendees": {
+          "type": "int",
+          "required": true
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "pending",
+              "confirmed",
+              "cancelled",
+              "completed"
+            ]
+          },
+          "required": true
+        },
+        "created_at": {
+          "type": "datetime",
+          "required": true
+        }
+      }
+    },
+    "user": {
+      "description": "ユーザー",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "email": {
+          "type": "string",
+          "required": true
+        },
+        "max_daily_hours": {
+          "type": "int",
+          "required": true,
+          "description": "1日の最大予約時間"
+        }
+      }
+    }
+  },
+  "derived": {
+    "reservation_duration_hours": {
+      "entity": "reservation",
+      "description": "予約時間（時間単位）",
+      "returns": "float",
+      "formula": {
+        "type": "binary",
+        "op": "div",
+        "left": {
+          "type": "date",
+          "op": "diff",
+          "args": [
+            {
+              "type": "self",
+              "field": "end_time"
+            },
+            {
+              "type": "self",
+              "field": "start_time"
+            }
+          ],
+          "unit": "minutes"
+        },
+        "right": {
+          "type": "literal",
+          "value": 60
+        }
+      }
+    },
+    "reservation_total_cost": {
+      "entity": "reservation",
+      "description": "予約料金",
+      "returns": "int",
+      "formula": {
+        "type": "binary",
+        "op": "mul",
+        "left": {
+          "type": "call",
+          "name": "reservation_duration_hours",
+          "args": [
+            {
+              "type": "self",
+              "field": ""
+            }
+          ]
+        },
+        "right": {
+          "type": "ref",
+          "path": "reservation.room.hourly_rate"
+        }
+      }
+    },
+    "room_has_conflict": {
+      "entity": "reservation",
+      "description": "他の予約と重複しているか",
+      "returns": "bool",
+      "formula": {
+        "type": "agg",
+        "op": "exists",
+        "from": "reservation",
+        "as": "other",
+        "where": {
+          "type": "binary",
+          "op": "and",
+          "left": {
+            "type": "binary",
+            "op": "and",
+            "left": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "other.room_id"
+              },
+              "right": {
+                "type": "self",
+                "field": "room_id"
+              }
+            },
+            "right": {
+              "type": "binary",
+              "op": "ne",
+              "left": {
+                "type": "ref",
+                "path": "other.id"
+              },
+              "right": {
+                "type": "self",
+                "field": "id"
+              }
+            }
+          },
+          "right": {
+            "type": "binary",
+            "op": "and",
+            "left": {
+              "type": "binary",
+              "op": "in",
+              "left": {
+                "type": "ref",
+                "path": "other.status"
+              },
+              "right": {
+                "type": "literal",
+                "value": [
+                  "pending",
+                  "confirmed"
+                ]
+              }
+            },
+            "right": {
+              "type": "date",
+              "op": "overlaps",
+              "args": [
+                {
+                  "type": "self",
+                  "field": "start_time"
+                },
+                {
+                  "type": "self",
+                  "field": "end_time"
+                },
+                {
+                  "type": "ref",
+                  "path": "other.start_time"
+                },
+                {
+                  "type": "ref",
+                  "path": "other.end_time"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "user_daily_reserved_hours": {
+      "entity": "user",
+      "description": "ユーザーの本日の予約済み時間",
+      "returns": "float",
+      "formula": {
+        "type": "agg",
+        "op": "sum",
+        "from": "reservation",
+        "as": "r",
+        "expr": {
+          "type": "call",
+          "name": "reservation_duration_hours",
+          "args": [
+            {
+              "type": "ref",
+              "path": "r"
+            }
+          ]
+        },
+        "where": {
+          "type": "binary",
+          "op": "and",
+          "left": {
+            "type": "binary",
+            "op": "and",
+            "left": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "r.user_id"
+              },
+              "right": {
+                "type": "self",
+                "field": "id"
+              }
+            },
+            "right": {
+              "type": "binary",
+              "op": "in",
+              "left": {
+                "type": "ref",
+                "path": "r.status"
+              },
+              "right": {
+                "type": "literal",
+                "value": [
+                  "pending",
+                  "confirmed"
+                ]
+              }
+            }
+          },
+          "right": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "date",
+              "op": "truncate",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "r.start_time"
+                }
+              ],
+              "unit": "days"
+            },
+            "right": {
+              "type": "date",
+              "op": "today"
+            }
+          }
+        }
+      }
+    },
+    "room_utilization_rate": {
+      "entity": "room",
+      "description": "部屋の本日の稼働率（%）",
+      "returns": "float",
+      "formula": {
+        "type": "binary",
+        "op": "mul",
+        "left": {
+          "type": "binary",
+          "op": "div",
+          "left": {
+            "type": "agg",
+            "op": "sum",
+            "from": "reservation",
+            "as": "r",
+            "expr": {
+              "type": "call",
+              "name": "reservation_duration_hours",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "r"
+                }
+              ]
+            },
+            "where": {
+              "type": "binary",
+              "op": "and",
+              "left": {
+                "type": "binary",
+                "op": "eq",
+                "left": {
+                  "type": "ref",
+                  "path": "r.room_id"
+                },
+                "right": {
+                  "type": "self",
+                  "field": "id"
+                }
+              },
+              "right": {
+                "type": "binary",
+                "op": "in",
+                "left": {
+                  "type": "ref",
+                  "path": "r.status"
+                },
+                "right": {
+                  "type": "literal",
+                  "value": [
+                    "confirmed",
+                    "completed"
+                  ]
+                }
+              }
+            }
+          },
+          "right": {
+            "type": "literal",
+            "value": 24
+          }
+        },
+        "right": {
+          "type": "literal",
+          "value": 100
+        }
+      }
+    }
+  },
+  "functions": {
+    "create_reservation": {
+      "description": "予約作成",
+      "input": {
+        "room_id": {
+          "type": "string",
+          "required": true
+        },
+        "user_id": {
+          "type": "string",
+          "required": true
+        },
+        "start_time": {
+          "type": "datetime",
+          "required": true
+        },
+        "end_time": {
+          "type": "datetime",
+          "required": true
+        },
+        "attendees": {
+          "type": "int",
+          "required": true
+        }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "room.is_available"
+            },
+            "right": {
+              "type": "literal",
+              "value": true
+            }
+          },
+          "entity": "room",
+          "reason": "利用可能な部屋のみ予約可能"
+        },
+        {
+          "expr": {
+            "type": "binary",
+            "op": "lt",
+            "left": {
+              "type": "input",
+              "name": "start_time"
+            },
+            "right": {
+              "type": "input",
+              "name": "end_time"
+            }
+          },
+          "reason": "開始時刻は終了時刻より前"
+        }
+      ],
+      "error": [
+        {
+          "code": "ROOM_NOT_AVAILABLE",
+          "when": {
+            "type": "binary",
+            "op": "ne",
+            "left": {
+              "type": "ref",
+              "path": "room.is_available"
+            },
+            "right": {
+              "type": "literal",
+              "value": true
+            }
+          },
+          "reason": "部屋が利用不可",
+          "http_status": 409
+        },
+        {
+          "code": "TIME_CONFLICT",
+          "when": {
+            "type": "agg",
+            "op": "exists",
+            "from": "reservation",
+            "as": "existing",
+            "where": {
+              "type": "binary",
+              "op": "and",
+              "left": {
+                "type": "binary",
+                "op": "and",
+                "left": {
+                  "type": "binary",
+                  "op": "eq",
+                  "left": {
+                    "type": "ref",
+                    "path": "existing.room_id"
+                  },
+                  "right": {
+                    "type": "input",
+                    "name": "room_id"
+                  }
+                },
+                "right": {
+                  "type": "binary",
+                  "op": "in",
+                  "left": {
+                    "type": "ref",
+                    "path": "existing.status"
+                  },
+                  "right": {
+                    "type": "literal",
+                    "value": [
+                      "pending",
+                      "confirmed"
+                    ]
+                  }
+                }
+              },
+              "right": {
+                "type": "date",
+                "op": "overlaps",
+                "args": [
+                  {
+                    "type": "input",
+                    "name": "start_time"
+                  },
+                  {
+                    "type": "input",
+                    "name": "end_time"
+                  },
+                  {
+                    "type": "ref",
+                    "path": "existing.start_time"
+                  },
+                  {
+                    "type": "ref",
+                    "path": "existing.end_time"
+                  }
+                ]
+              }
+            }
+          },
+          "reason": "指定時間帯に既存の予約あり",
+          "http_status": 409
+        },
+        {
+          "code": "EXCEEDS_CAPACITY",
+          "when": {
+            "type": "binary",
+            "op": "gt",
+            "left": {
+              "type": "input",
+              "name": "attendees"
+            },
+            "right": {
+              "type": "ref",
+              "path": "room.capacity"
+            }
+          },
+          "reason": "参加人数が定員超過",
+          "http_status": 409
+        },
+        {
+          "code": "EXCEEDS_DAILY_LIMIT",
+          "when": {
+            "type": "binary",
+            "op": "gt",
+            "left": {
+              "type": "binary",
+              "op": "add",
+              "left": {
+                "type": "call",
+                "name": "user_daily_reserved_hours",
+                "args": [
+                  {
+                    "type": "ref",
+                    "path": "user"
+                  }
+                ]
+              },
+              "right": {
+                "type": "binary",
+                "op": "div",
+                "left": {
+                  "type": "date",
+                  "op": "diff",
+                  "args": [
+                    {
+                      "type": "input",
+                      "name": "end_time"
+                    },
+                    {
+                      "type": "input",
+                      "name": "start_time"
+                    }
+                  ],
+                  "unit": "minutes"
+                },
+                "right": {
+                  "type": "literal",
+                  "value": 60
+                }
+              }
+            },
+            "right": {
+              "type": "ref",
+              "path": "user.max_daily_hours"
+            }
+          },
+          "reason": "1日の予約上限を超過",
+          "http_status": 409
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "create": "reservation",
+            "with": {
+              "room_id": {
+                "type": "input",
+                "name": "room_id"
+              },
+              "user_id": {
+                "type": "input",
+                "name": "user_id"
+              },
+              "start_time": {
+                "type": "input",
+                "name": "start_time"
+              },
+              "end_time": {
+                "type": "input",
+                "name": "end_time"
+              },
+              "attendees": {
+                "type": "input",
+                "name": "attendees"
+              },
+              "status": {
+                "type": "literal",
+                "value": "pending"
+              },
+              "created_at": {
+                "type": "date",
+                "op": "now"
+              }
+            }
+          },
+          "reason": "予約レコード作成"
+        }
+      ]
+    },
+    "cancel_reservation": {
+      "description": "予約キャンセル",
+      "input": {
+        "reservation_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "in",
+            "left": {
+              "type": "ref",
+              "path": "reservation.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": [
+                "pending",
+                "confirmed"
+              ]
+            }
+          },
+          "entity": "reservation",
+          "reason": "保留中または確定済みの予約のみキャンセル可能"
+        }
+      ],
+      "error": [
+        {
+          "code": "TOO_LATE_TO_CANCEL",
+          "when": {
+            "type": "binary",
+            "op": "and",
+            "left": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "reservation.status"
+              },
+              "right": {
+                "type": "literal",
+                "value": "confirmed"
+              }
+            },
+            "right": {
+              "type": "binary",
+              "op": "lt",
+              "left": {
+                "type": "date",
+                "op": "diff",
+                "args": [
+                  {
+                    "type": "ref",
+                    "path": "reservation.start_time"
+                  },
+                  {
+                    "type": "date",
+                    "op": "now"
+                  }
+                ],
+                "unit": "hours"
+              },
+              "right": {
+                "type": "literal",
+                "value": 1
+              }
+            }
+          },
+          "reason": "開始1時間前を切った確定済み予約はキャンセル不可",
+          "http_status": 409
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "reservation",
+            "set": {
+              "status": {
+                "type": "literal",
+                "value": "cancelled"
+              }
+            }
+          },
+          "reason": "予約ステータスをキャンセルに変更"
+        }
+      ]
+    }
+  },
+  "scenarios": {
+    "AT-RES-001": {
+      "title": "正常に予約を作成できる",
+      "given": {
+        "room": {
+          "id": "ROOM-001",
+          "name": "会議室A",
+          "capacity": 10,
+          "hourly_rate": 1000,
+          "is_available": true
+        },
+        "user": {
+          "id": "USER-001",
+          "name": "田中太郎",
+          "email": "tanaka@example.com",
+          "max_daily_hours": 8
+        },
+        "reservation": []
+      },
+      "when": {
+        "call": "create_reservation",
+        "input": {
+          "room_id": "ROOM-001",
+          "user_id": "USER-001",
+          "start_time": "2024-12-01T10:00:00Z",
+          "end_time": "2024-12-01T12:00:00Z",
+          "attendees": 5
+        }
+      },
+      "then": {
+        "success": true,
+        "assert": [
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "agg",
+              "op": "count",
+              "from": "reservation",
+              "where": {
+                "type": "binary",
+                "op": "eq",
+                "left": {
+                  "type": "ref",
+                  "path": "item.room_id"
+                },
+                "right": {
+                  "type": "literal",
+                  "value": "ROOM-001"
+                }
+              }
+            },
+            "right": {
+              "type": "literal",
+              "value": 1
+            }
+          }
+        ]
+      }
+    },
+    "AT-RES-002": {
+      "title": "時間重複でエラー",
+      "given": {
+        "room": {
+          "id": "ROOM-001",
+          "name": "会議室A",
+          "capacity": 10,
+          "hourly_rate": 1000,
+          "is_available": true
+        },
+        "user": {
+          "id": "USER-001",
+          "name": "田中太郎",
+          "email": "tanaka@example.com",
+          "max_daily_hours": 8
+        },
+        "reservation": [
+          {
+            "id": "RES-001",
+            "room_id": "ROOM-001",
+            "user_id": "USER-001",
+            "start_time": "2024-12-01T10:00:00Z",
+            "end_time": "2024-12-01T12:00:00Z",
+            "attendees": 5,
+            "status": "confirmed",
+            "created_at": "2024-11-30T00:00:00Z"
+          }
+        ]
+      },
+      "when": {
+        "call": "create_reservation",
+        "input": {
+          "room_id": "ROOM-001",
+          "user_id": "USER-001",
+          "start_time": "2024-12-01T11:00:00Z",
+          "end_time": "2024-12-01T13:00:00Z",
+          "attendees": 3
+        }
+      },
+      "then": {
+        "success": false,
+        "error": "TIME_CONFLICT"
+      }
+    },
+    "AT-RES-003": {
+      "title": "定員超過でエラー",
+      "given": {
+        "room": {
+          "id": "ROOM-001",
+          "name": "小会議室",
+          "capacity": 4,
+          "hourly_rate": 500,
+          "is_available": true
+        },
+        "user": {
+          "id": "USER-001",
+          "name": "田中太郎",
+          "email": "tanaka@example.com",
+          "max_daily_hours": 8
+        },
+        "reservation": []
+      },
+      "when": {
+        "call": "create_reservation",
+        "input": {
+          "room_id": "ROOM-001",
+          "user_id": "USER-001",
+          "start_time": "2024-12-01T10:00:00Z",
+          "end_time": "2024-12-01T11:00:00Z",
+          "attendees": 10
+        }
+      },
+      "then": {
+        "success": false,
+        "error": "EXCEEDS_CAPACITY"
+      }
+    }
+  },
+  "invariants": [
+    {
+      "id": "INV-RES-001",
+      "entity": "reservation",
+      "expr": {
+        "type": "binary",
+        "op": "lt",
+        "left": {
+          "type": "self",
+          "field": "start_time"
+        },
+        "right": {
+          "type": "self",
+          "field": "end_time"
+        }
+      },
+      "description": "開始時刻は常に終了時刻より前"
+    },
+    {
+      "id": "INV-RES-002",
+      "entity": "reservation",
+      "expr": {
+        "type": "binary",
+        "op": "gt",
+        "left": {
+          "type": "self",
+          "field": "attendees"
+        },
+        "right": {
+          "type": "literal",
+          "value": 0
+        }
+      },
+      "description": "参加人数は常に1以上"
+    },
+    {
+      "id": "INV-RES-003",
+      "entity": "reservation",
+      "expr": {
+        "type": "binary",
+        "op": "or",
+        "left": {
+          "type": "binary",
+          "op": "ne",
+          "left": {
+            "type": "self",
+            "field": "status"
+          },
+          "right": {
+            "type": "literal",
+            "value": "confirmed"
+          }
+        },
+        "right": {
+          "type": "unary",
+          "op": "not",
+          "expr": {
+            "type": "call",
+            "name": "room_has_conflict",
+            "args": [
+              {
+                "type": "self",
+                "field": ""
+              }
+            ]
+          }
+        }
+      },
+      "description": "確定済み予約は重複しない"
+    }
+  ]
+}

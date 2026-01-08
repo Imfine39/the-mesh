@@ -1,0 +1,493 @@
+{
+  "meta": {
+    "id": "accounting-poc",
+    "title": "会計システム PoC",
+    "version": "0.1.0",
+    "domain": "accounting"
+  },
+  "state": {
+    "customer": {
+      "description": "顧客",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "name": {
+          "type": "string",
+          "required": true
+        }
+      }
+    },
+    "invoice": {
+      "description": "請求書",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "customer_id": {
+          "type": {
+            "ref": "customer"
+          },
+          "required": true
+        },
+        "amount": {
+          "type": "int",
+          "required": true
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "open",
+              "closed",
+              "cancelled"
+            ]
+          },
+          "required": true
+        }
+      }
+    },
+    "payment": {
+      "description": "入金",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "customer_id": {
+          "type": {
+            "ref": "customer"
+          },
+          "required": true
+        },
+        "amount": {
+          "type": "int",
+          "required": true
+        }
+      }
+    },
+    "allocation": {
+      "description": "消込",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "invoice_id": {
+          "type": {
+            "ref": "invoice"
+          },
+          "required": true
+        },
+        "payment_id": {
+          "type": {
+            "ref": "payment"
+          },
+          "required": true
+        },
+        "amount": {
+          "type": "int",
+          "required": true
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "active",
+              "cancelled"
+            ]
+          },
+          "required": true
+        }
+      }
+    }
+  },
+  "derived": {
+    "remaining": {
+      "entity": "invoice",
+      "description": "残額（請求額 - 消込済み額）",
+      "returns": "int",
+      "formula": {
+        "type": "binary",
+        "op": "sub",
+        "left": {
+          "type": "self",
+          "field": "amount"
+        },
+        "right": {
+          "type": "agg",
+          "op": "sum",
+          "from": "allocation",
+          "as": "item",
+          "expr": {
+            "type": "ref",
+            "path": "item.amount"
+          },
+          "where": {
+            "type": "binary",
+            "op": "and",
+            "left": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "item.invoice_id"
+              },
+              "right": {
+                "type": "self",
+                "field": "id"
+              }
+            },
+            "right": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "item.status"
+              },
+              "right": {
+                "type": "literal",
+                "value": "active"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "functions": {
+    "allocate_payment": {
+      "description": "支払いを請求書に消込",
+      "implements": [
+        "REQ-001"
+      ],
+      "input": {
+        "invoice_id": {
+          "type": "string",
+          "required": true
+        },
+        "payment_id": {
+          "type": "string",
+          "required": true
+        },
+        "amount": {
+          "type": "int",
+          "required": true
+        }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "invoice.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "open"
+            }
+          },
+          "entity": "invoice",
+          "reason": "オープン状態の請求書のみ消込可能"
+        }
+      ],
+      "error": [
+        {
+          "code": "INVOICE_NOT_OPEN",
+          "when": {
+            "type": "binary",
+            "op": "ne",
+            "left": {
+              "type": "ref",
+              "path": "invoice.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "open"
+            }
+          },
+          "reason": "請求書がオープン状態ではない",
+          "http_status": 409
+        },
+        {
+          "code": "OVER_ALLOCATION",
+          "when": {
+            "type": "binary",
+            "op": "lt",
+            "left": {
+              "type": "call",
+              "name": "remaining",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "invoice"
+                }
+              ]
+            },
+            "right": {
+              "type": "input",
+              "name": "amount"
+            }
+          },
+          "reason": "消込額が残額を超過",
+          "http_status": 409
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "create": "allocation",
+            "with": {
+              "invoice_id": {
+                "type": "input",
+                "name": "invoice_id"
+              },
+              "payment_id": {
+                "type": "input",
+                "name": "payment_id"
+              },
+              "amount": {
+                "type": "input",
+                "name": "amount"
+              },
+              "status": {
+                "type": "literal",
+                "value": "active"
+              }
+            }
+          },
+          "reason": "消込レコード作成"
+        },
+        {
+          "action": {
+            "update": "invoice",
+            "set": {
+              "status": {
+                "type": "literal",
+                "value": "closed"
+              }
+            }
+          },
+          "condition": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "call",
+              "name": "remaining",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "invoice"
+                }
+              ]
+            },
+            "right": {
+              "type": "literal",
+              "value": 0
+            }
+          },
+          "reason": "残額ゼロで自動クローズ"
+        }
+      ]
+    }
+  },
+  "scenarios": {
+    "AT-001": {
+      "title": "部分消込で残額が減少する",
+      "verifies": [
+        "REQ-001"
+      ],
+      "given": {
+        "customer": {
+          "id": "CUST-001",
+          "name": "テスト株式会社"
+        },
+        "invoice": {
+          "id": "INV-001",
+          "customer_id": "CUST-001",
+          "amount": 100000,
+          "status": "open"
+        },
+        "payment": {
+          "id": "PAY-001",
+          "customer_id": "CUST-001",
+          "amount": 80000
+        },
+        "allocation": []
+      },
+      "when": {
+        "call": "allocate_payment",
+        "input": {
+          "invoice_id": "INV-001",
+          "payment_id": "PAY-001",
+          "amount": 80000
+        }
+      },
+      "then": {
+        "success": true,
+        "assert": [
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "call",
+              "name": "remaining",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "invoice"
+                }
+              ]
+            },
+            "right": {
+              "type": "literal",
+              "value": 20000
+            }
+          },
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "invoice.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "open"
+            }
+          }
+        ]
+      }
+    },
+    "AT-002": {
+      "title": "全額消込でstatusがclosedになる",
+      "verifies": [
+        "REQ-001"
+      ],
+      "given": {
+        "customer": {
+          "id": "CUST-001",
+          "name": "テスト株式会社"
+        },
+        "invoice": {
+          "id": "INV-001",
+          "customer_id": "CUST-001",
+          "amount": 100000,
+          "status": "open"
+        },
+        "payment": {
+          "id": "PAY-001",
+          "customer_id": "CUST-001",
+          "amount": 100000
+        },
+        "allocation": []
+      },
+      "when": {
+        "call": "allocate_payment",
+        "input": {
+          "invoice_id": "INV-001",
+          "payment_id": "PAY-001",
+          "amount": 100000
+        }
+      },
+      "then": {
+        "success": true,
+        "assert": [
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "call",
+              "name": "remaining",
+              "args": [
+                {
+                  "type": "ref",
+                  "path": "invoice"
+                }
+              ]
+            },
+            "right": {
+              "type": "literal",
+              "value": 0
+            }
+          },
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "invoice.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "closed"
+            }
+          }
+        ]
+      }
+    },
+    "AT-003": {
+      "title": "過剰消込はエラーになる",
+      "verifies": [
+        "REQ-001"
+      ],
+      "given": {
+        "customer": {
+          "id": "CUST-001",
+          "name": "テスト株式会社"
+        },
+        "invoice": {
+          "id": "INV-001",
+          "customer_id": "CUST-001",
+          "amount": 100000,
+          "status": "open"
+        },
+        "payment": {
+          "id": "PAY-001",
+          "customer_id": "CUST-001",
+          "amount": 150000
+        },
+        "allocation": []
+      },
+      "when": {
+        "call": "allocate_payment",
+        "input": {
+          "invoice_id": "INV-001",
+          "payment_id": "PAY-001",
+          "amount": 120000
+        }
+      },
+      "then": {
+        "success": false,
+        "error": "OVER_ALLOCATION"
+      }
+    }
+  },
+  "invariants": [
+    {
+      "id": "INV-001",
+      "entity": "invoice",
+      "expr": {
+        "type": "binary",
+        "op": "ge",
+        "left": {
+          "type": "call",
+          "name": "remaining",
+          "args": [
+            {
+              "type": "self",
+              "field": ""
+            }
+          ]
+        },
+        "right": {
+          "type": "literal",
+          "value": 0
+        }
+      },
+      "description": "残額は常に0以上"
+    }
+  ]
+}
