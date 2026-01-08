@@ -1,0 +1,275 @@
+# 計算可能な仕様書 v4: 限界テスト版
+# 表現できるか？影響範囲を出し切れるか？
+
+meta:
+  id: SPEC-ACCOUNTING-004
+  title: "Accounting Spec v4 (Stress Test)"
+  version: "v0.4"
+
+requirements:
+  REQ-001:
+    who: 経理担当者
+    why: 部分消込で柔軟な入金管理をするため
+    what: 部分消込ができること
+    acceptance: [AT-001]
+
+  REQ-002:
+    who: 経理担当者
+    why: 同一顧客の請求と入金のみを紐づけるため
+    what: 異なる顧客間での消込ができないこと
+    acceptance: [AT-004]
+
+  REQ-003:
+    who: システム管理者
+    why: データ整合性を保つため
+    what: 請求削除時に関連消込も削除されること
+    acceptance: [AT-005]
+
+state:
+  customer:
+    id: string
+    name: string
+
+  invoice:
+    id: string
+    customer_id: string      # FK: customer.id
+    amount: int
+    tax_amount: int          # 税額を追加
+    discount_rate: float     # 割引率を追加
+    status: enum[open, closed, cancelled]
+    created_at: datetime
+
+  payment:
+    id: string
+    customer_id: string      # FK: customer.id
+    amount: int
+    received_at: datetime
+
+  allocation:
+    id: string
+    invoice_id: string       # FK: invoice.id
+    payment_id: string       # FK: payment.id
+    amount: int
+    allocated_at: datetime
+
+# DB制約を明示的に定義
+constraints:
+  - type: foreign_key
+    from: invoice.customer_id
+    to: customer.id
+
+  - type: foreign_key
+    from: payment.customer_id
+    to: customer.id
+
+  - type: foreign_key
+    from: allocation.invoice_id
+    to: invoice.id
+    on_delete: cascade       # カスケード削除
+
+  - type: foreign_key
+    from: allocation.payment_id
+    to: payment.id
+
+  - type: unique
+    fields: [allocation.invoice_id, allocation.payment_id]
+    comment: "同一invoice-paymentペアは1レコードのみ"
+
+derived:
+  # 税・割引を考慮した請求額
+  net_amount:
+    params: [invoice]
+    formula: "invoice.amount * (1 - invoice.discount_rate) + invoice.tax_amount"
+
+  # 残額（税・割引考慮後）
+  remaining:
+    params: [invoice]
+    formula: "net_amount(invoice) - sum(allocation.amount where allocation.invoice_id = invoice.id)"
+
+  # 入金の未消込残高
+  payment_balance:
+    params: [payment]
+    formula: "payment.amount - sum(allocation.amount where allocation.payment_id = payment.id)"
+
+functions:
+  allocate_payment:
+    input:
+      invoice_id: string
+      payment_id: string
+      amount: int
+    pre:
+      - "invoice.status == 'open'"
+      - "remaining(invoice) >= input.amount"
+      - "payment_balance(payment) >= input.amount"
+      - "invoice.customer_id == payment.customer_id"   # 同一顧客制約
+    post:
+      - create: allocation
+        set:
+          amount: input.amount
+          invoice_id: input.invoice_id
+          payment_id: input.payment_id
+          allocated_at: now()
+      - when: "remaining(invoice) == 0"
+        update: invoice
+        set:
+          status: closed
+    error:
+      - when: "remaining(invoice) < input.amount"
+        code: OVER_ALLOCATION
+      - when: "invoice.customer_id != payment.customer_id"
+        code: CUSTOMER_MISMATCH
+
+  delete_invoice:
+    input:
+      invoice_id: string
+    pre:
+      - "invoice.status != 'closed'"
+    post:
+      - delete: allocation
+        where: "allocation.invoice_id == input.invoice_id"
+      - delete: invoice
+        where: "invoice.id == input.invoice_id"
+
+invariants:
+  - id: INV-001
+    expr: "remaining(invoice) >= 0"
+    description: "残額は常に0以上"
+
+  - id: INV-002
+    expr: "payment_balance(payment) >= 0"
+    description: "入金残高は常に0以上"
+
+scenarios:
+  AT-001:
+    title: 部分消込（税・割引考慮）
+    requirements: [REQ-001]
+    given:
+      state:
+        customer:
+          - id: "CUST-001"
+        invoice:
+          - id: "INV-001"
+            customer_id: "CUST-001"
+            amount: 100000
+            tax_amount: 10000
+            discount_rate: 0.1
+            status: open
+        payment:
+          - id: "PAY-001"
+            customer_id: "CUST-001"
+            amount: 50000
+        allocation: []
+    when:
+      call: allocate_payment
+      input:
+        invoice_id: "INV-001"
+        payment_id: "PAY-001"
+        amount: 50000
+    then:
+      assert:
+        # net_amount = 100000 * 0.9 + 10000 = 100000
+        # remaining = 100000 - 50000 = 50000
+        - "remaining(invoice) == 50000"
+        - "payment_balance(payment) == 0"
+        - "invoice.status == 'open'"
+
+  AT-004:
+    title: 異なる顧客間での消込エラー
+    requirements: [REQ-002]
+    given:
+      state:
+        customer:
+          - id: "CUST-001"
+          - id: "CUST-002"
+        invoice:
+          - id: "INV-001"
+            customer_id: "CUST-001"
+            amount: 100000
+            tax_amount: 0
+            discount_rate: 0
+            status: open
+        payment:
+          - id: "PAY-001"
+            customer_id: "CUST-002"  # 別顧客
+            amount: 100000
+        allocation: []
+    when:
+      call: allocate_payment
+      input:
+        invoice_id: "INV-001"
+        payment_id: "PAY-001"
+        amount: 100000
+    then:
+      error: CUSTOMER_MISMATCH
+
+  AT-005:
+    title: 請求削除時のカスケード削除
+    requirements: [REQ-003]
+    given:
+      state:
+        customer:
+          - id: "CUST-001"
+        invoice:
+          - id: "INV-001"
+            customer_id: "CUST-001"
+            amount: 100000
+            tax_amount: 0
+            discount_rate: 0
+            status: open
+        payment:
+          - id: "PAY-001"
+            customer_id: "CUST-001"
+            amount: 50000
+        allocation:
+          - id: "ALLOC-001"
+            invoice_id: "INV-001"
+            payment_id: "PAY-001"
+            amount: 50000
+    when:
+      call: delete_invoice
+      input:
+        invoice_id: "INV-001"
+    then:
+      assert:
+        - "count(allocation where allocation.invoice_id == 'INV-001') == 0"
+        - "count(invoice where invoice.id == 'INV-001') == 0"
+        - "payment_balance(payment) == 50000"  # 入金残高が復活
+
+  # 複数ステップのシナリオ
+  AT-006:
+    title: 連続消込で完済
+    requirements: [REQ-001]
+    steps:
+      - given:
+          state:
+            customer:
+              - id: "CUST-001"
+            invoice:
+              - id: "INV-001"
+                customer_id: "CUST-001"
+                amount: 100000
+                tax_amount: 0
+                discount_rate: 0
+                status: open
+            payment:
+              - id: "PAY-001"
+                customer_id: "CUST-001"
+                amount: 60000
+              - id: "PAY-002"
+                customer_id: "CUST-001"
+                amount: 40000
+            allocation: []
+      - when:
+          call: allocate_payment
+          input: { invoice_id: "INV-001", payment_id: "PAY-001", amount: 60000 }
+        then:
+          assert:
+            - "remaining(invoice) == 40000"
+            - "invoice.status == 'open'"
+      - when:
+          call: allocate_payment
+          input: { invoice_id: "INV-001", payment_id: "PAY-002", amount: 40000 }
+        then:
+          assert:
+            - "remaining(invoice) == 0"
+            - "invoice.status == 'closed'"

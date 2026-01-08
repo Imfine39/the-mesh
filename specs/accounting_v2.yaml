@@ -1,0 +1,83 @@
+# 計算可能な仕様書 v2: depends_on 不要版
+# 式から依存関係を自動抽出する
+
+meta:
+  id: SPEC-ACCOUNTING-002
+  title: "Accounting Spec v2 (Auto-dependency)"
+  version: "v0.2"
+
+state:
+  invoice:
+    id: string
+    customer_id: string
+    amount: int
+    status: enum[open, closed]
+
+  payment:
+    id: string
+    customer_id: string
+    amount: int
+
+  allocation:
+    invoice_id: string
+    payment_id: string
+    amount: int
+
+derived:
+  remaining:
+    params: [invoice]
+    formula: "invoice.amount - sum(allocation.amount where allocation.invoice_id = invoice.id)"
+
+functions:
+  create_invoice:
+    input:
+      customer_id: string
+      amount: int
+    pre:
+      - "input.amount > 0"
+    post:
+      - create: invoice
+        set:
+          amount: input.amount
+          status: open
+          customer_id: input.customer_id
+
+  register_payment:
+    input:
+      customer_id: string
+      amount: int
+    pre:
+      - "input.amount > 0"
+    post:
+      - create: payment
+        set:
+          amount: input.amount
+          customer_id: input.customer_id
+
+  allocate_payment:
+    input:
+      invoice_id: string
+      payment_id: string
+      amount: int
+    pre:
+      - "invoice.status == 'open'"
+      - "payment.amount >= input.amount"
+      - "remaining(invoice) >= input.amount"
+    post:
+      - create: allocation
+        set:
+          amount: input.amount
+          invoice_id: input.invoice_id
+          payment_id: input.payment_id
+      - when: "remaining(invoice) == 0"
+        update: invoice
+        set:
+          status: closed
+    error:
+      - when: "remaining(invoice) < input.amount"
+        code: OVER_ALLOCATION
+
+invariants:
+  - id: INV-001
+    expr: "remaining(invoice) >= 0"
+    description: "Invoice remaining amount must never be negative"

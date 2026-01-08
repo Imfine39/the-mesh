@@ -1,0 +1,165 @@
+# 要求起点の仕様書
+# REQ → AT → 式 の整合性を明示する
+
+meta:
+  id: SPEC-ACCOUNTING-005
+  title: "要求起点の会計仕様"
+  version: "v0.5"
+
+# ============================================
+# 要求定義（これが起点）
+# ============================================
+requirements:
+  REQ-001:
+    who: 経理担当者
+    why: 入金を請求に紐づけて売掛金を消すため
+    what: 部分消込ができること
+
+    # この要求を満たすために必要な条件を分解
+    conditions:
+      - id: COND-001-1
+        description: 残額がある請求に対して、残額以下の金額を消込できる
+        acceptance: [AT-001]
+
+      - id: COND-001-2
+        description: 消込後、残額が正しく減少する
+        acceptance: [AT-001]
+        verifies:
+          - expr: "remaining(invoice) == before_remaining - input.amount"
+
+  REQ-002:
+    who: 経理担当者
+    why: 完済した請求を自動でクローズし、管理工数を減らすため
+    what: 全額消込時に請求が自動クローズされること
+
+    conditions:
+      - id: COND-002-1
+        description: 残額が0になったら、請求ステータスがclosedになる
+        acceptance: [AT-002]
+        verifies:
+          - expr: "remaining(invoice) == 0 implies invoice.status == 'closed'"
+
+  REQ-003:
+    who: 経理担当者
+    why: 過剰な消込による会計不整合を防ぐため
+    what: 残額を超える消込ができないこと
+
+    conditions:
+      - id: COND-003-1
+        description: 残額を超える金額での消込はエラーになる
+        acceptance: [AT-003]
+        verifies:
+          - expr: "input.amount > remaining(invoice) implies error(OVER_ALLOCATION)"
+
+# ============================================
+# 式の定義（要求から導出）
+# ============================================
+derived:
+  remaining:
+    description: 請求の残額（要求を満たすために必要な計算）
+    derived_from:
+      - REQ-001  # 部分消込の判定に使用
+      - REQ-002  # 完済判定に使用
+      - REQ-003  # 過剰消込判定に使用
+    formula: "invoice.amount - sum(allocation.amount where allocation.invoice_id = invoice.id)"
+
+# ============================================
+# 関数の定義（要求から導出）
+# ============================================
+functions:
+  allocate_payment:
+    description: 消込実行（REQ-001, 002, 003 を実現）
+    implements:
+      - REQ-001
+      - REQ-002
+      - REQ-003
+
+    # pre: 構造的チェック（呼び出し資格・状態の前提条件）
+    pre:
+      - expr: "invoice.status == 'open'"
+        reason: "クローズ済み請求には消込できない"
+      # NOTE: 残額チェックはビジネスルールなのでerrorで扱う
+
+    post:
+      - action: "create allocation"
+        reason: "消込レコードを作成"
+        required_by: REQ-001
+
+      - condition: "remaining(invoice) == 0"
+        action: "invoice.status = closed"
+        reason: "全額消込で自動クローズ"
+        required_by: REQ-002
+
+    # error: ビジネスルール違反（業務エラー）
+    error:
+      - code: OVER_ALLOCATION
+        when: "remaining(invoice) < input.amount"
+        reason: "残額を超える消込はできない"
+        required_by: REQ-003
+
+# ============================================
+# シナリオ（要求の検証）
+# ============================================
+scenarios:
+  AT-001:
+    title: 部分消込で残額が減少する
+    verifies:
+      - COND-001-1
+      - COND-001-2
+    given:
+      invoice: { amount: 100000, status: open }
+      payment: { amount: 80000 }
+      allocation: []
+    when:
+      call: allocate_payment
+      input: { amount: 80000 }
+    then:
+      success: true
+      assert:
+        - "remaining(invoice) == 20000"
+        - "invoice.status == 'open'"
+
+  AT-002:
+    title: 全額消込で自動クローズ
+    verifies:
+      - COND-002-1
+    given:
+      invoice: { amount: 100000, status: open }
+      payment: { amount: 100000 }
+      allocation: []
+    when:
+      call: allocate_payment
+      input: { amount: 100000 }
+    then:
+      success: true
+      assert:
+        - "remaining(invoice) == 0"
+        - "invoice.status == 'closed'"
+
+  AT-003:
+    title: 残額超過でエラー
+    verifies:
+      - COND-003-1
+    given:
+      invoice: { amount: 100000, status: open }
+      payment: { amount: 150000 }
+      allocation: []
+    when:
+      call: allocate_payment
+      input: { amount: 120000 }
+    then:
+      error: OVER_ALLOCATION
+
+# ============================================
+# State（最小限）
+# ============================================
+state:
+  invoice:
+    amount: int
+    status: enum[open, closed]
+  payment:
+    amount: int
+  allocation:
+    invoice_id: string
+    payment_id: string
+    amount: int

@@ -1,0 +1,398 @@
+# 予約システム仕様書（v5正式版）
+# ホテル・施設予約の仕様
+
+meta:
+  id: SPEC-RESERVATION-V5
+  title: "施設予約システム"
+  version: "v5.0"
+  domain: hospitality
+
+# ============================================
+# 要求定義
+# ============================================
+requirements:
+  REQ-001:
+    who: 顧客
+    why: 宿泊・施設利用を予約するため
+    what: 空き状況を確認して予約できること
+    conditions:
+      - id: COND-001-1
+        description: 空いている部屋・施設を予約できる
+        acceptance: [AT-001]
+      - id: COND-001-2
+        description: 予約済みの日程は予約できない
+        acceptance: [AT-002]
+
+  REQ-002:
+    who: 顧客
+    why: 予定が変わった場合に対応するため
+    what: 予約をキャンセルできること
+    conditions:
+      - id: COND-002-1
+        description: チェックイン前の予約はキャンセルできる
+        acceptance: [AT-003]
+      - id: COND-002-2
+        description: キャンセルポリシーに基づきキャンセル料が発生
+        acceptance: [AT-004]
+      - id: COND-002-3
+        description: チェックイン後はキャンセルできない
+        acceptance: [AT-005]
+
+  REQ-003:
+    who: フロント担当者
+    why: 顧客の到着を記録するため
+    what: チェックイン処理ができること
+    conditions:
+      - id: COND-003-1
+        description: 予約済みの顧客をチェックインできる
+        acceptance: [AT-006]
+      - id: COND-003-2
+        description: チェックイン日より前にはチェックインできない
+        acceptance: [AT-007]
+
+  REQ-004:
+    who: フロント担当者
+    why: 顧客の退出を記録し精算するため
+    what: チェックアウト処理ができること
+    conditions:
+      - id: COND-004-1
+        description: 滞在中の顧客をチェックアウトできる
+        acceptance: [AT-008]
+      - id: COND-004-2
+        description: チェックアウト時に請求金額が確定する
+        acceptance: [AT-009]
+
+  REQ-005:
+    who: 管理者
+    why: 収益を最適化するため
+    what: 稼働率が計算されること
+    conditions:
+      - id: COND-005-1
+        description: 稼働率 = 予約済み部屋数 / 総部屋数
+        acceptance: [AT-010]
+
+# ============================================
+# 状態定義
+# ============================================
+state:
+  room:
+    id: string
+    room_number: string
+    room_type: enum[single, double, twin, suite]
+    capacity: int
+    price_per_night: int
+    status: enum[available, occupied, maintenance]
+
+  guest:
+    id: string
+    name: string
+    email: string
+    phone: string
+
+  reservation:
+    id: string
+    room_id: string
+    guest_id: string
+    check_in_date: string
+    check_out_date: string
+    num_guests: int
+    status: enum[pending, confirmed, checked_in, checked_out, cancelled]
+    total_amount: int
+    cancel_fee: int
+
+  payment:
+    id: string
+    reservation_id: string
+    amount: int
+    method: enum[credit_card, cash, bank_transfer]
+    status: enum[pending, completed, refunded]
+
+# ============================================
+# 計算式
+# ============================================
+derived:
+  nights:
+    description: 宿泊日数
+    derived_from: [REQ-004]
+    formula: "date_diff(reservation.check_out_date, reservation.check_in_date)"
+
+  room_charge:
+    description: 宿泊料金
+    derived_from: [REQ-004]
+    formula: "room.price_per_night * nights(reservation)"
+
+  is_room_available:
+    description: 部屋が指定期間に空いているか
+    derived_from: [REQ-001]
+    formula: "not exists(reservation where reservation.room_id == room.id and reservation.status in ['confirmed', 'checked_in'] and overlaps(reservation.check_in_date, reservation.check_out_date, input.check_in_date, input.check_out_date))"
+
+  occupancy_rate:
+    description: 稼働率（%）
+    derived_from: [REQ-005]
+    formula: "(count(room where room.status == 'occupied') / count(room)) * 100"
+
+  cancel_fee_rate:
+    description: キャンセル料率
+    derived_from: [REQ-002]
+    formula: "case when days_until_checkin >= 7 then 0 when days_until_checkin >= 3 then 0.3 when days_until_checkin >= 1 then 0.5 else 1.0 end"
+
+# ============================================
+# 関数定義
+# ============================================
+functions:
+  make_reservation:
+    description: 予約を作成
+    implements: [REQ-001]
+    input:
+      room_id: string
+      guest_id: string
+      check_in_date: string
+      check_out_date: string
+      num_guests: int
+    pre:
+      - expr: "input.check_in_date < input.check_out_date"
+        reason: "チェックアウト日はチェックイン日より後"
+      - expr: "input.num_guests <= room.capacity"
+        reason: "定員オーバー"
+    error:
+      - code: ROOM_NOT_AVAILABLE
+        when: "not is_room_available(room, input.check_in_date, input.check_out_date)"
+        reason: "指定期間は予約済みです"
+        required_by: REQ-001
+      - code: CAPACITY_EXCEEDED
+        when: "input.num_guests > room.capacity"
+        reason: "定員を超えています"
+        required_by: REQ-001
+    post:
+      - action: "create reservation with status = 'confirmed'"
+        reason: "予約を作成"
+        required_by: REQ-001
+      - action: "reservation.total_amount = room_charge(reservation)"
+        reason: "料金を計算"
+
+  cancel_reservation:
+    description: 予約をキャンセル
+    implements: [REQ-002]
+    input:
+      reservation_id: string
+    pre:
+      - expr: "reservation.status == 'confirmed'"
+        reason: "確定済み予約のみキャンセル可能"
+    error:
+      - code: ALREADY_CHECKED_IN
+        when: "reservation.status == 'checked_in'"
+        reason: "チェックイン済みの予約はキャンセルできません"
+        required_by: REQ-002
+    post:
+      - action: "reservation.status = 'cancelled'"
+        reason: "キャンセル状態に更新"
+        required_by: REQ-002
+      - action: "reservation.cancel_fee = total_amount * cancel_fee_rate"
+        reason: "キャンセル料を計算"
+        required_by: REQ-002
+
+  check_in:
+    description: チェックイン処理
+    implements: [REQ-003]
+    input:
+      reservation_id: string
+    pre:
+      - expr: "reservation.status == 'confirmed'"
+        reason: "確定済み予約のみチェックイン可能"
+      - expr: "today >= reservation.check_in_date"
+        reason: "チェックイン日以降のみ"
+    error:
+      - code: TOO_EARLY
+        when: "today < reservation.check_in_date"
+        reason: "チェックイン日より前です"
+        required_by: REQ-003
+    post:
+      - action: "reservation.status = 'checked_in'"
+        reason: "チェックイン状態に更新"
+        required_by: REQ-003
+      - action: "room.status == 'occupied'"
+        reason: "部屋を使用中に"
+
+  check_out:
+    description: チェックアウト処理
+    implements: [REQ-004]
+    input:
+      reservation_id: string
+    pre:
+      - expr: "reservation.status == 'checked_in'"
+        reason: "チェックイン済み予約のみチェックアウト可能"
+    post:
+      - action: "reservation.status = 'checked_out'"
+        reason: "チェックアウト状態に更新"
+        required_by: REQ-004
+      - action: "room.status = 'available'"
+        reason: "部屋を空きに"
+      - action: "create payment with amount = reservation.total_amount"
+        reason: "請求を作成"
+        required_by: REQ-004
+
+# ============================================
+# シナリオ
+# ============================================
+scenarios:
+  AT-001:
+    title: 空き部屋を予約
+    verifies: [COND-001-1]
+    given:
+      room: { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: available }
+      guest: { id: "GUEST-001", name: "山田太郎", email: "yamada@example.com", phone: "090-1234-5678" }
+      reservation: []
+    when:
+      call: make_reservation
+      input: { room_id: "ROOM-101", guest_id: "GUEST-001", check_in_date: "2024-12-20", check_out_date: "2024-12-22", num_guests: 2 }
+    then:
+      success: true
+      assert:
+        - "reservation.status == 'confirmed'"
+        - "reservation.total_amount == 30000"
+
+  AT-002:
+    title: 予約済み期間は予約不可
+    verifies: [COND-001-2]
+    given:
+      room: { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: available }
+      guest: { id: "GUEST-001", name: "山田太郎", email: "yamada@example.com", phone: "090-1234-5678" }
+      reservation:
+        - { id: "RES-001", room_id: "ROOM-101", guest_id: "GUEST-002", check_in_date: "2024-12-20", check_out_date: "2024-12-22", status: confirmed, total_amount: 30000 }
+    when:
+      call: make_reservation
+      input: { room_id: "ROOM-101", guest_id: "GUEST-001", check_in_date: "2024-12-21", check_out_date: "2024-12-23", num_guests: 2 }
+    then:
+      error: ROOM_NOT_AVAILABLE
+
+  AT-003:
+    title: 予約をキャンセル
+    verifies: [COND-002-1]
+    given:
+      room: { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: available }
+      reservation: { id: "RES-001", room_id: "ROOM-101", guest_id: "GUEST-001", check_in_date: "2024-12-20", check_out_date: "2024-12-22", status: confirmed, total_amount: 30000, cancel_fee: 0 }
+    when:
+      call: cancel_reservation
+      input: { reservation_id: "RES-001" }
+    then:
+      success: true
+      assert:
+        - "reservation.status == 'cancelled'"
+
+  AT-004:
+    title: キャンセル料が発生
+    verifies: [COND-002-2]
+    given:
+      room: { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: available }
+      reservation: { id: "RES-001", room_id: "ROOM-101", guest_id: "GUEST-001", check_in_date: "2024-12-20", check_out_date: "2024-12-22", status: confirmed, total_amount: 30000, cancel_fee: 0 }
+    when:
+      call: cancel_reservation
+      input: { reservation_id: "RES-001" }
+    then:
+      success: true
+      assert:
+        - "reservation.cancel_fee >= 0"
+
+  AT-005:
+    title: チェックイン後はキャンセル不可
+    verifies: [COND-002-3]
+    given:
+      room: { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: occupied }
+      reservation: { id: "RES-001", room_id: "ROOM-101", guest_id: "GUEST-001", check_in_date: "2024-12-20", check_out_date: "2024-12-22", status: checked_in, total_amount: 30000, cancel_fee: 0 }
+    when:
+      call: cancel_reservation
+      input: { reservation_id: "RES-001" }
+    then:
+      error: ALREADY_CHECKED_IN
+
+  AT-006:
+    title: チェックイン処理
+    verifies: [COND-003-1]
+    given:
+      room: { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: available }
+      reservation: { id: "RES-001", room_id: "ROOM-101", guest_id: "GUEST-001", check_in_date: "2024-12-20", check_out_date: "2024-12-22", status: confirmed, total_amount: 30000 }
+    when:
+      call: check_in
+      input: { reservation_id: "RES-001" }
+    then:
+      success: true
+      assert:
+        - "reservation.status == 'checked_in'"
+        - "room.status == 'occupied'"
+
+  AT-007:
+    title: チェックイン日より前はエラー
+    verifies: [COND-003-2]
+    given:
+      room: { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: available }
+      reservation: { id: "RES-001", room_id: "ROOM-101", guest_id: "GUEST-001", check_in_date: "2024-12-25", check_out_date: "2024-12-27", status: confirmed, total_amount: 30000 }
+    when:
+      call: check_in
+      input: { reservation_id: "RES-001" }
+    then:
+      error: TOO_EARLY
+
+  AT-008:
+    title: チェックアウト処理
+    verifies: [COND-004-1]
+    given:
+      room: { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: occupied }
+      reservation: { id: "RES-001", room_id: "ROOM-101", guest_id: "GUEST-001", check_in_date: "2024-12-20", check_out_date: "2024-12-22", status: checked_in, total_amount: 30000 }
+      payment: []
+    when:
+      call: check_out
+      input: { reservation_id: "RES-001" }
+    then:
+      success: true
+      assert:
+        - "reservation.status == 'checked_out'"
+        - "room.status == 'available'"
+
+  AT-009:
+    title: チェックアウト時に請求作成
+    verifies: [COND-004-2]
+    given:
+      room: { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: occupied }
+      reservation: { id: "RES-001", room_id: "ROOM-101", guest_id: "GUEST-001", check_in_date: "2024-12-20", check_out_date: "2024-12-22", status: checked_in, total_amount: 30000 }
+      payment: []
+    when:
+      call: check_out
+      input: { reservation_id: "RES-001" }
+    then:
+      success: true
+      assert:
+        - "payment.amount == 30000"
+
+  AT-010:
+    title: 稼働率の計算
+    verifies: [COND-005-1]
+    given:
+      room:
+        - { id: "ROOM-101", room_number: "101", room_type: double, capacity: 2, price_per_night: 15000, status: occupied }
+        - { id: "ROOM-102", room_number: "102", room_type: single, capacity: 1, price_per_night: 10000, status: occupied }
+        - { id: "ROOM-103", room_number: "103", room_type: twin, capacity: 2, price_per_night: 18000, status: available }
+        - { id: "ROOM-104", room_number: "104", room_type: suite, capacity: 4, price_per_night: 50000, status: available }
+    when:
+      call: check_in
+      input: { reservation_id: "RES-003" }
+    then:
+      success: true
+      assert:
+        - "occupancy_rate == 50"
+
+# ============================================
+# 不変条件
+# ============================================
+invariants:
+  - id: INV-001
+    expr: "reservation.check_in_date < reservation.check_out_date"
+    description: "チェックアウト日はチェックイン日より後"
+  - id: INV-002
+    expr: "reservation.num_guests > 0"
+    description: "宿泊人数は1以上"
+  - id: INV-003
+    expr: "reservation.total_amount >= 0"
+    description: "宿泊料金は0以上"
+  - id: INV-004
+    expr: "occupancy_rate >= 0 and occupancy_rate <= 100"
+    description: "稼働率は0〜100%"

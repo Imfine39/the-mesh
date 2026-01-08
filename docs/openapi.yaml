@@ -1,0 +1,133 @@
+openapi: 3.0.3
+info:
+  title: 要求起点の会計仕様
+  version: v0.5
+  description: 'Spec ID: SPEC-ACCOUNTING-005
+
+
+    この API は仕様書から自動生成されました。'
+servers:
+- url: http://localhost:8080
+  description: Development server
+paths:
+  /api/allocate_payment:
+    post:
+      summary: 消込実行（REQ-001, 002, 003 を実現）
+      description: '消込実行（REQ-001, 002, 003 を実現）
+
+
+
+        実現する要求: REQ-001, REQ-002, REQ-003
+
+
+
+        **前提条件:**
+
+
+        - `invoice.status == ''open''`: クローズ済み請求には消込できない'
+      operationId: allocate_payment
+      tags:
+      - REQ-001
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '400':
+          description: Bad Request - 前提条件違反
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 'Business Rule Violation: OVER_ALLOCATION'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: OVER_ALLOCATION
+                message: 残額を超える消込はできない
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: integer
+              required:
+              - amount
+components:
+  schemas:
+    Invoice:
+      type: object
+      properties:
+        amount:
+          type: integer
+        status:
+          type: string
+          enum:
+          - open
+          - closed
+        id:
+          type: string
+          description: invoice の一意識別子
+      required:
+      - id
+      - amount
+      - status
+    Payment:
+      type: object
+      properties:
+        amount:
+          type: integer
+        id:
+          type: string
+          description: payment の一意識別子
+      required:
+      - id
+      - amount
+    Allocation:
+      type: object
+      properties:
+        invoice_id:
+          type: string
+        payment_id:
+          type: string
+        amount:
+          type: integer
+        id:
+          type: string
+          description: allocation の一意識別子
+      required:
+      - id
+      - invoice_id
+      - payment_id
+      - amount
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          description: エラーコード
+        message:
+          type: string
+          description: エラーメッセージ
+      required:
+      - code
+      - message
+tags:
+- name: REQ-001
+  description: 部分消込ができること
+- name: REQ-002
+  description: 全額消込時に請求が自動クローズされること
+- name: REQ-003
+  description: 残額を超える消込ができないこと

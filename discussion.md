@@ -592,6 +592,80 @@ requirements:
 
 ---
 
+## DSL設計（詳細議論のたたき台）
+
+### 目的（DSLが担う責務）
+
+* **ATの中身を機械可読で表現**し、CIでの検証・生成・可視化に使う
+* “正”は frontmatter で固定し、**DSLは「具体的な挙動記述」**に集中させる
+* 文章だけのGWTではなく、**データを含めたテスト仕様の再利用**を狙う
+
+### DSLの適用範囲（どこまでをDSLで書くか）
+
+* **対象**：Acceptance Test（AT-*）、ディシジョンテーブル化したEdge Case
+* **対象外**：OpenAPI/DBの契約定義（別フォーマットが正）
+* **補助**：画面遷移のスモーク（モック段階）にも流用可
+
+### 形式（提案）
+
+* **ファイル構成**：`specs/features/F-XXXX.md` に frontmatter + DSL本文
+* **frontmatter**：ID/owns/depends_on/acceptance/requirements を唯一の正とする
+* **DSL本文**：AT単位のテスト定義を列挙（GWT + データ）
+
+#### 例（草案）
+
+```
+AT-1234-001:
+  title: 申請フォームの送信
+  given:
+    - role: approver
+    - page: /apply
+  when:
+    - fill:
+        field: reason
+        value: "出張"
+    - click: submit
+  then:
+    - page: /apply/confirm
+    - visible: "確認"
+  requirements:
+    - REQ-2026-0012
+
+AT-1234-002:
+  title: 必須項目の未入力
+  given:
+    - role: approver
+    - page: /apply
+  when:
+    - click: submit
+  then:
+    - error: "reason is required"
+  requirements:
+    - REQ-2026-0013
+```
+
+### DSLに求める制約（機械検出の前提）
+
+* **ID一意性**：AT IDの重複は禁止（index生成で検出）
+* **参照整合**：requirements/depends_on の参照は validate で強制
+* **行為語彙の固定**：`fill`, `click`, `visible`, `error` などの語彙を限定して解析容易にする
+* **テスト冪等性**：同じATがモック/本番で共通に流せることを理想とする
+
+### DSLとAT/REQの関係（前提の整理）
+
+* frontmatter が “正” であるため、**DSL内のrequirementsは参照補助**（重複でもOK）
+* カバレッジ判定は **frontmatterの acceptance/requirements** を基準にする
+* DSLは **ATの手順詳細** として使い、CIでは「存在・形式・語彙」の検証を行う
+
+### 次に詰めるべき論点
+
+* DSLの最小語彙（UI/E2E向け or API向けの分離）
+* データ表現（JSON/YAML混在の許容範囲、値の型）
+* 失敗メッセージの定義（error/invalid/forbidden 等）
+* ATのタグ付け（smoke/regression/mock-only など）
+
+---
+
 ## 未決事項・論点（次の議論）
 
 * [ ] 本ドキュメントの「最適案」を正式合意として固定するか（frontmatter正・Feature固定bundle・契約差分を正とするbreaking判定・RFCのDoD）
