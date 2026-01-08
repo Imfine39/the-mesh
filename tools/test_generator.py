@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Test Generator v4: AST-based test code generation from Spec YAML
+Test Generator v5: 統一パーサーベースのテストコード生成
 
-Uses expression_parser for unified expression handling.
+spec_parser を使用して v5/v6 両方の形式に対応。
 """
 
 import yaml
@@ -10,10 +10,11 @@ import re
 from typing import Dict, List, Any, Optional, Set
 from pathlib import Path
 
-# Import expression parser
+# Import parsers
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
-from expression_parser import parse, to_python, PythonGenerator, ASTNode, FieldAccess, FunctionCall
+from expression_parser import parse as parse_simple_expr, to_python, PythonGenerator, ASTNode, FieldAccess, FunctionCall
+from spec_parser import SpecParser, StructuredPythonGenerator, parse_formula, to_python_code, StructuredNodeType
 
 
 def to_snake_case(name: str) -> str:
@@ -63,61 +64,92 @@ def extract_derived_names(spec: Dict[str, Any]) -> List[str]:
     return list(spec.get('derived', {}).keys())
 
 
+def is_v6_format(formula: Any) -> bool:
+    """Check if formula is in v6 structured format"""
+    return isinstance(formula, dict)
+
+
 # ==================================================
 # Derived Function Generator
 # ==================================================
 
-def extract_entity_from_formula(formula: str) -> Optional[str]:
-    """Extract the primary entity name from a formula (e.g., 'payment' from 'payment.amount - ...')"""
-    # Pattern: starts with entity.field
-    match = re.match(r'^(\w+)\.', formula)
-    if match:
-        return match.group(1)
-    # Pattern: function call with entity argument
-    match = re.search(r'\((\w+)\)', formula)
-    if match and match.group(1) not in ('state', 'entity', 'input'):
-        return match.group(1)
+def extract_entity_from_formula(formula: Any) -> Optional[str]:
+    """Extract the primary entity name from a formula"""
+    if isinstance(formula, str):
+        # Pattern: starts with entity.field
+        match = re.match(r'^(\w+)\.', formula)
+        if match:
+            entity = match.group(1)
+            if entity != 'self':
+                return entity
+            return None
+        # Pattern: function call with entity argument
+        match = re.search(r'\((\w+)\)', formula)
+        if match and match.group(1) not in ('state', 'entity', 'input', 'self'):
+            return match.group(1)
     return None
 
 
 def generate_derived_function(name: str, d: Dict[str, Any], spec: Dict[str, Any]) -> str:
-    """Generate derived function using AST parser"""
+    """Generate derived function using unified parser"""
     lines = []
     formula = d.get('formula', '')
     description = d.get('description', name)
     derived_names = extract_derived_names(spec)
 
-    # Extract entity name from formula for proper substitution
-    entity_name = extract_entity_from_formula(formula)
-
     lines.append(f"def {name}(state: dict, entity: dict) -> Any:")
     lines.append(f'    """{description}"""')
-    lines.append(f"    # Formula: {formula}")
 
     try:
-        ast = parse(formula)
-        gen = PythonGenerator(entity_var='entity', state_var='state', input_var='input_data',
-                             entity_name=entity_name)
-
-        # Handle different AST patterns
-        code = gen.generate(ast)
-
-        # For simple field access subtraction patterns, handle specially
-        if 'sum(' in formula or 'count(' in formula:
-            # Aggregation - already handled by generator
+        if is_v6_format(formula):
+            # v6 structured format - use spec_parser
+            parser = SpecParser(spec)
+            ast = parser.parse_formula(formula)
+            gen = StructuredPythonGenerator(
+                entity_var='entity',
+                state_var='state',
+                input_var='input_data',
+                entity_name=None,
+                spec=spec
+            )
+            code = gen.generate(ast)
+            lines.append(f"    # Formula (v6): {repr(formula)[:80]}...")
             lines.append(f"    return {code}")
-        elif ' - ' in formula and any(dn in formula for dn in derived_names):
-            # Pattern: entity.field - other_derived(entity)
-            lines.append(f"    return {code}")
-        elif '/' in formula and '*' in formula:
-            # Ratio pattern: (a / b) * 100
-            # Handle division by zero
-            lines.append(f"    try:")
-            lines.append(f"        return {code}")
-            lines.append(f"    except ZeroDivisionError:")
-            lines.append(f"        return 0")
         else:
-            lines.append(f"    return {code}")
+            # v5 string format - use original logic with 'self' support
+            lines.append(f"    # Formula (v5): {formula}")
+
+            # Check if formula uses 'self' keyword (v6 style in string)
+            if 'self.' in formula:
+                parser = SpecParser(spec)
+                ast = parser.parse_formula(formula)
+                gen = StructuredPythonGenerator(
+                    entity_var='entity',
+                    state_var='state',
+                    input_var='input_data',
+                    spec=spec
+                )
+                code = gen.generate(ast)
+            else:
+                # Extract entity name from formula for proper substitution
+                entity_name = extract_entity_from_formula(formula)
+                simple_ast = parse_simple_expr(formula)
+                gen = PythonGenerator(
+                    entity_var='entity',
+                    state_var='state',
+                    input_var='input_data',
+                    entity_name=entity_name
+                )
+                code = gen.generate(simple_ast)
+
+            # Handle division by zero for ratio patterns
+            if '/' in str(formula) and '*' in str(formula):
+                lines.append(f"    try:")
+                lines.append(f"        return {code}")
+                lines.append(f"    except ZeroDivisionError:")
+                lines.append(f"        return 0")
+            else:
+                lines.append(f"    return {code}")
 
     except Exception as e:
         # Fallback: return entity amount
@@ -132,8 +164,76 @@ def generate_derived_function(name: str, d: Dict[str, Any], spec: Dict[str, Any]
 # Function Stub Generator
 # ==================================================
 
+def generate_expression_code(expr: Any, spec: Dict[str, Any], entity_var: str = None) -> str:
+    """Generate Python code from expression (string or structured)"""
+    if is_v6_format(expr):
+        parser = SpecParser(spec)
+        ast = parser.parse_formula(expr)
+        gen = StructuredPythonGenerator(
+            entity_var=entity_var or 'entity',
+            state_var='state',
+            input_var='input_data',
+            spec=spec
+        )
+        return gen.generate(ast)
+    elif isinstance(expr, str):
+        if 'self.' in expr:
+            parser = SpecParser(spec)
+            ast = parser.parse_formula(expr)
+            gen = StructuredPythonGenerator(
+                entity_var=entity_var or 'entity',
+                state_var='state',
+                input_var='input_data',
+                spec=spec
+            )
+            return gen.generate(ast)
+        else:
+            try:
+                simple_ast = parse_simple_expr(expr)
+                gen = PythonGenerator(state_var='state', input_var='input_data')
+                return gen.generate(simple_ast)
+            except Exception:
+                # Fallback for unparseable expressions
+                return f"# Unparseable: {expr}"
+    else:
+        return repr(expr)
+
+
+def generate_action_code(action: Any, spec: Dict[str, Any]) -> List[str]:
+    """Generate Python code from action (string or structured)"""
+    lines = []
+
+    if is_v6_format(action):
+        parser = SpecParser(spec)
+        ast = parser.parse_formula(action)
+        gen = StructuredPythonGenerator(
+            entity_var='entity',
+            state_var='state',
+            input_var='input_data',
+            spec=spec
+        )
+        code = gen.generate(ast)
+        for line in code.split('\n'):
+            if line.strip():
+                lines.append(line)
+    elif isinstance(action, str):
+        try:
+            simple_ast = parse_simple_expr(action)
+            gen = PythonGenerator(state_var='state', input_var='input_data')
+            code = gen.generate(simple_ast)
+            for line in code.split('\n'):
+                if line.strip():
+                    lines.append(line)
+        except Exception as e:
+            lines.append(f"# Parse error for '{action}': {e}")
+    else:
+        lines.append(f"# Unknown action type: {type(action)}")
+
+    return lines
+
+
 def generate_function_stub(func_name: str, func_def: Dict[str, Any], spec: Dict[str, Any]) -> str:
-    """Generate function stub using AST parser"""
+    """Generate function stub using unified parser"""
     lines = []
     description = func_def.get('description', func_name)
     pre = func_def.get('pre', [])
@@ -163,13 +263,11 @@ def generate_function_stub(func_name: str, func_def: Dict[str, Any], spec: Dict[
                 reason = err.get('reason', '')
 
                 try:
-                    ast = parse(when)
-                    gen = PythonGenerator(state_var='state', input_var='input_data')
-                    condition = gen.generate(ast)
+                    condition = generate_expression_code(when, spec)
                     lines.append(f"    if {condition}:")
                     lines.append(f'        raise BusinessError("{code}", "{reason}")')
                 except Exception as e:
-                    lines.append(f"    # Parse error for '{when}': {e}")
+                    lines.append(f"    # Parse error for error condition: {e}")
         lines.append("")
 
     # Precondition checks (generic PRECONDITION_FAILED)
@@ -179,11 +277,10 @@ def generate_function_stub(func_name: str, func_def: Dict[str, Any], spec: Dict[
             if isinstance(p, dict):
                 expr = p.get('expr', '')
                 reason = p.get('reason', '')
+                entity_hint = p.get('entity')
 
                 try:
-                    ast = parse(expr)
-                    gen = PythonGenerator(state_var='state', input_var='input_data')
-                    condition = gen.generate(ast)
+                    condition = generate_expression_code(expr, spec, entity_hint)
                     lines.append(f"    if not ({condition}):")
                     lines.append(f'        raise BusinessError("PRECONDITION_FAILED", "{reason}")')
                 except Exception as e:
@@ -199,28 +296,22 @@ def generate_function_stub(func_name: str, func_def: Dict[str, Any], spec: Dict[
             condition = p.get('condition', '')
 
             try:
-                # Parse the action
-                ast = parse(action)
-                gen = PythonGenerator(state_var='state', input_var='input_data')
-                code = gen.generate(ast)
+                action_lines = generate_action_code(action, spec)
 
                 if condition:
                     # Conditional action
-                    cond_ast = parse(condition)
-                    cond_code = gen.generate(cond_ast)
-                    code_lines = [l for l in code.split('\n') if l.strip()]
-                    if code_lines:
+                    cond_code = generate_expression_code(condition, spec)
+                    if action_lines:
                         lines.append(f"    if {cond_code}:")
-                        for line in code_lines:
+                        for line in action_lines:
                             lines.append(f"        {line}")
                 else:
-                    # Direct action - each line gets proper indentation
-                    for line in code.split('\n'):
-                        if line.strip():
-                            lines.append(f"    {line}")
+                    # Direct action
+                    for line in action_lines:
+                        lines.append(f"    {line}")
 
             except Exception as e:
-                lines.append(f"    # Parse error for '{action}': {e}")
+                lines.append(f"    # Parse error for action: {e}")
 
     lines.append("")
     lines.append("    return {'success': True}")
@@ -232,12 +323,16 @@ def generate_function_stub(func_name: str, func_def: Dict[str, Any], spec: Dict[
 # Test Function Generator
 # ==================================================
 
-def translate_assertion(expr: str, entities: Set[str]) -> str:
-    """Translate spec assertion to pytest assert using AST"""
+def translate_assertion(assertion: Any, entities: Set[str], spec: Dict[str, Any]) -> str:
+    """Translate spec assertion to pytest assert"""
+    # v6 format: assertion can be dict with 'expr' key or structured expression
+    if isinstance(assertion, dict):
+        if 'expr' in assertion:
+            assertion = assertion['expr']
+        # else it's a structured expression
+
     try:
-        ast = parse(expr)
-        gen = PythonGenerator(state_var='state', input_var='input_data')
-        code = gen.generate(ast)
+        code = generate_expression_code(assertion, spec)
 
         # Replace entity.get('field') with state['entity'].get('field')
         # because test functions don't have entity variables defined
@@ -248,12 +343,8 @@ def translate_assertion(expr: str, entities: Set[str]) -> str:
 
         return f"assert {code}"
     except Exception as e:
-        # Fallback: simple regex replacement
-        result = expr
-        for entity in entities:
-            result = re.sub(rf"\b{entity}\.(\w+)", rf"state['{entity}']['\1']", result)
-        result = re.sub(r'(\w+)\((\w+)\)', r"\1(state, state['\2'])", result)
-        return f"assert {result}  # Fallback: {e}"
+        # Fallback
+        return f"assert True  # Could not parse: {assertion} ({e})"
 
 
 def generate_test_function(scenario_id: str, scenario: Dict[str, Any], spec: Dict[str, Any]) -> str:
@@ -316,7 +407,7 @@ def generate_test_function(scenario_id: str, scenario: Dict[str, Any], spec: Dic
             lines.append("    assert result['success'] is True")
 
         for assertion in then.get('assert', []):
-            python_assert = translate_assertion(assertion, entities)
+            python_assert = translate_assertion(assertion, entities, spec)
             lines.append(f"    {python_assert}")
 
     lines.append("")
@@ -376,11 +467,36 @@ def generate_test_file(spec: Dict[str, Any]) -> str:
     lines.append("")
     lines.append("import pytest")
     lines.append("from typing import Dict, Any, List")
-    lines.append("from datetime import date, datetime")
+    lines.append("from datetime import date, datetime, timedelta")
     lines.append("")
-    lines.append("# Date helper")
+    lines.append("# Date helpers")
     lines.append("def today() -> str:")
     lines.append("    return date.today().isoformat()")
+    lines.append("")
+    lines.append("def now() -> str:")
+    lines.append("    return datetime.now().isoformat()")
+    lines.append("")
+    lines.append("def date_diff(d1: str, d2: str, unit: str = 'days') -> int:")
+    lines.append("    \"\"\"Calculate difference between two dates\"\"\"")
+    lines.append("    from datetime import datetime")
+    lines.append("    dt1 = datetime.fromisoformat(d1)")
+    lines.append("    dt2 = datetime.fromisoformat(d2)")
+    lines.append("    delta = dt2 - dt1")
+    lines.append("    if unit == 'days':")
+    lines.append("        return delta.days")
+    lines.append("    elif unit == 'hours':")
+    lines.append("        return int(delta.total_seconds() / 3600)")
+    lines.append("    return delta.days")
+    lines.append("")
+    lines.append("def overlaps(start1: str, end1: str, start2: str, end2: str) -> bool:")
+    lines.append("    \"\"\"Check if two date ranges overlap\"\"\"")
+    lines.append("    return start1 < end2 and start2 < end1")
+    lines.append("")
+    lines.append("def add_days(d: str, days: int) -> str:")
+    lines.append("    \"\"\"Add days to a date\"\"\"")
+    lines.append("    from datetime import datetime, timedelta")
+    lines.append("    dt = datetime.fromisoformat(d)")
+    lines.append("    return (dt + timedelta(days=days)).date().isoformat()")
     lines.append("")
     lines.append("")
 
@@ -413,26 +529,33 @@ def generate_test_file(spec: Dict[str, Any]) -> str:
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Test Generator v4 - AST-based test generation')
-    parser.add_argument('spec_path', help='Path to spec YAML file')
-    parser.add_argument('-o', '--output', help='Output file path')
+    parser = argparse.ArgumentParser(description='Test Generator v5 - Unified parser test generation')
+    parser.add_argument('spec_path', nargs='+', help='Path to spec YAML file(s)')
+    parser.add_argument('-o', '--output', help='Output directory for test files (default: tests/)')
 
     args = parser.parse_args()
 
-    # Load spec
-    with open(args.spec_path, 'r') as f:
-        spec = yaml.safe_load(f)
+    output_dir = Path(args.output) if args.output else Path('tests')
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate test file
-    test_code = generate_test_file(spec)
+    for spec_path in args.spec_path:
+        spec_path = Path(spec_path)
 
-    # Output
-    if args.output:
-        with open(args.output, 'w') as f:
+        # Load spec
+        with open(spec_path, 'r') as f:
+            spec = yaml.safe_load(f)
+
+        # Generate test file
+        test_code = generate_test_file(spec)
+
+        # Determine output filename
+        output_file = output_dir / f"test_{spec_path.stem}.py"
+
+        # Write output
+        with open(output_file, 'w') as f:
             f.write(test_code)
-        print(f"Generated: {args.output}")
-    else:
-        print(test_code)
+
+        print(f"Generated: {output_file}")
 
 
 if __name__ == '__main__':

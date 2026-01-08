@@ -1,16 +1,41 @@
 """
 Auto-generated tests from: 会計システム - 消込管理
-Spec ID: SPEC-ACCOUNTING-V5-FULL
-Version: v5.0
+Spec ID: SPEC-ACCOUNTING-V6-FULL
+Version: v6.0
 """
 
 import pytest
 from typing import Dict, Any, List
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-# Date helper
+# Date helpers
 def today() -> str:
     return date.today().isoformat()
+
+def now() -> str:
+    return datetime.now().isoformat()
+
+def date_diff(d1: str, d2: str, unit: str = 'days') -> int:
+    """Calculate difference between two dates"""
+    from datetime import datetime
+    dt1 = datetime.fromisoformat(d1)
+    dt2 = datetime.fromisoformat(d2)
+    delta = dt2 - dt1
+    if unit == 'days':
+        return delta.days
+    elif unit == 'hours':
+        return int(delta.total_seconds() / 3600)
+    return delta.days
+
+def overlaps(start1: str, end1: str, start2: str, end2: str) -> bool:
+    """Check if two date ranges overlap"""
+    return start1 < end2 and start2 < end1
+
+def add_days(d: str, days: int) -> str:
+    """Add days to a date"""
+    from datetime import datetime, timedelta
+    dt = datetime.fromisoformat(d)
+    return (dt + timedelta(days=days)).date().isoformat()
 
 
 # ==================================================
@@ -27,19 +52,19 @@ class BusinessError(Exception):
 
 def remaining(state: dict, entity: dict) -> Any:
     """請求の残額"""
-    # Formula: invoice.amount - sum(allocation.amount where allocation.invoice_id == invoice.id and allocation.status == 'active')
+    # Formula (v6): {'subtract': ['self.amount', {'sum': {'expr': 'item.amount', 'from': 'allocation...
     return (entity.get('amount') - sum(item.get('amount', 0) for item in state.get('allocation', []) if ((item.get('invoice_id') == entity.get('id')) and (item.get('status') == 'active'))))
 
 
 def total_allocated(state: dict, entity: dict) -> Any:
     """入金の消込済み合計額"""
-    # Formula: sum(allocation.amount where allocation.payment_id == payment.id and allocation.status == 'active')
-    return sum(item.get('amount', 0) for item in state.get('allocation', []) if ((item.get('payment_id') == payment.get('id')) and (item.get('status') == 'active')))
+    # Formula (v6): {'sum': {'expr': 'item.amount', 'from': 'allocation as item', 'where': {'and': [...
+    return sum(item.get('amount', 0) for item in state.get('allocation', []) if ((item.get('payment_id') == entity.get('id')) and (item.get('status') == 'active')))
 
 
 def payment_remaining(state: dict, entity: dict) -> Any:
     """入金の未消込残額"""
-    # Formula: payment.amount - total_allocated(payment)
+    # Formula (v6): {'subtract': ['self.amount', {'call': 'total_allocated', 'args': ['self']}]}...
     return (entity.get('amount') - total_allocated(state, entity))
 
 
@@ -69,6 +94,10 @@ def allocate_payment(state: dict, input_data: dict) -> dict:
 
     # 状態更新
     new_allocation = {'id': f'ALLOCATION-{len(state.get("allocation", [])) + 1:03d}', **input_data}
+    new_allocation['invoice_id'] = input_data.get('invoice_id')
+    new_allocation['payment_id'] = input_data.get('payment_id')
+    new_allocation['amount'] = input_data.get('amount')
+    new_allocation['status'] = 'active'
     if 'allocation' not in state: state['allocation'] = []
     state['allocation'].append(new_allocation)
     if (remaining(state, invoice) == 0):
