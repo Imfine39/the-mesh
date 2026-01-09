@@ -35,7 +35,7 @@ dev = [
 ]
 
 [project.scripts]
-the_mesh = "the_mesh.mcp.server:main"
+the_mesh = "the_mesh.mcp.server:main_sync"
 
 [project.urls]
 Homepage = "https://github.com/the-mesh/the-mesh"

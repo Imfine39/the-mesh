@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 from dataclasses import dataclass
 
-from the_mesh.core.validator import MeshValidator, ValidationResult
+from the_mesh.core.validator import MeshValidator
+from the_mesh.core.errors import ValidationResult
 from the_mesh.graph.graph import DependencyGraph, ImpactAnalysis
 
 

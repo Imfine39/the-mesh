@@ -3,7 +3,6 @@
 import json
 from pathlib import Path
 from typing import Any, Literal
-from dataclasses import dataclass, field as dataclass_field
 
 try:
     import jsonschema
@@ -11,6 +10,16 @@ try:
     HAS_JSONSCHEMA = True
 except ImportError:
     HAS_JSONSCHEMA = False
+
+# Import from split modules
+from the_mesh.core.errors import StructuredError, ValidationError, ValidationResult
+from the_mesh.core.cache import ValidationCache, ValidationContext, DEFAULT_VALIDATION_CONTEXT
+from the_mesh.core.domain import (
+    StateMachineValidationMixin,
+    SagaValidationMixin,
+    PolicyValidationMixin,
+    MiscValidationMixin,
+)
 
 
 # Error code prefixes
@@ -21,126 +30,6 @@ except ImportError:
 # FSM-xxx: State machine errors
 # LGC-xxx: Logic errors
 # CNS-xxx: Constraint errors
-
-@dataclass
-class StructuredError:
-    """Machine-processable error format for Claude Code integration"""
-
-    # Location info
-    path: str  # JSONPath: "state.functions.create_invoice.pre[0].expr"
-    line: int | None = None  # Line number in source file (if available)
-
-    # Error classification
-    code: str = ""  # Systematic code: "TYP-001", "REF-002"
-    category: Literal["schema", "reference", "type", "logic", "constraint"] = "schema"
-    severity: Literal["critical", "error", "warning"] = "error"
-    message: str = ""  # Human-readable message (for debugging)
-
-    # Machine-processable info
-    expected: Any = None  # Expected value/format
-    actual: Any = None  # Actual value
-    valid_options: list[str] = dataclass_field(default_factory=list)  # Valid choices (for Enum etc.)
-
-    # Auto-fix info
-    auto_fixable: bool = False  # Can be auto-fixed
-    fix_patch: dict | None = None  # JSON Patch format fix suggestion
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization"""
-        return {
-            "path": self.path,
-            "line": self.line,
-            "code": self.code,
-            "category": self.category,
-            "severity": self.severity,
-            "message": self.message,
-            "expected": self.expected,
-            "actual": self.actual,
-            "valid_options": self.valid_options,
-            "auto_fixable": self.auto_fixable,
-            "fix_patch": self.fix_patch,
-        }
-
-
-# Alias for backward compatibility
-@dataclass
-class ValidationError:
-    """Legacy error format - wraps StructuredError for backward compatibility"""
-    path: str
-    message: str
-    severity: str = "error"
-
-    # Extended fields (optional for backward compatibility)
-    code: str = ""
-    category: str = "schema"
-    expected: Any = None
-    actual: Any = None
-    valid_options: list[str] = dataclass_field(default_factory=list)
-    auto_fixable: bool = False
-    fix_patch: dict | None = None
-
-    def to_structured(self) -> StructuredError:
-        """Convert to StructuredError"""
-        return StructuredError(
-            path=self.path,
-            message=self.message,
-            severity=self.severity if self.severity in ("critical", "error", "warning") else "error",
-            code=self.code,
-            category=self.category if self.category in ("schema", "reference", "type", "logic", "constraint") else "schema",
-            expected=self.expected,
-            actual=self.actual,
-            valid_options=self.valid_options,
-            auto_fixable=self.auto_fixable,
-            fix_patch=self.fix_patch,
-        )
-
-
-# =========================================================================
-# Validation Context for depth limiting and other settings
-# =========================================================================
-
-@dataclass
-class ValidationCache:
-    """Cache for validation results to avoid re-validation"""
-    # Expression hash -> validation errors (for identical expressions)
-    expression_results: dict = dataclass_field(default_factory=dict)
-    # Reference path -> resolved entity/field (for path resolution)
-    reference_cache: dict = dataclass_field(default_factory=dict)
-    # Entity name -> field info (for entity lookups)
-    entity_fields_cache: dict = dataclass_field(default_factory=dict)
-    # Stats for debugging
-    hits: int = 0
-    misses: int = 0
-
-    def clear(self):
-        """Clear all caches"""
-        self.expression_results.clear()
-        self.reference_cache.clear()
-        self.entity_fields_cache.clear()
-        self.hits = 0
-        self.misses = 0
-
-
-@dataclass
-class ValidationContext:
-    """Configuration for validation behavior"""
-    max_depth: int = 50  # Maximum expression nesting depth
-    current_depth: int = 0
-    cache: ValidationCache | None = None  # Optional cache for performance
-
-    def with_depth(self, depth: int) -> "ValidationContext":
-        """Create a new context with specified depth"""
-        return ValidationContext(max_depth=self.max_depth, current_depth=depth, cache=self.cache)
-
-    def get_or_create_cache(self) -> ValidationCache:
-        """Get existing cache or create new one"""
-        if self.cache is None:
-            self.cache = ValidationCache()
-        return self.cache
-
-
-# Default validation context
-DEFAULT_VALIDATION_CONTEXT = ValidationContext()
 
 
 # =========================================================================
@@ -264,376 +153,13 @@ EXPRESSION_OPERATORS = {
 }
 
 
-@dataclass
-class ValidationResult:
-    valid: bool
-    errors: list[ValidationError]
-    warnings: list[ValidationError]
 
-    def to_structured_errors(self) -> list[StructuredError]:
-        """Convert all errors to StructuredError format"""
-        return [e.to_structured() for e in self.errors]
-
-    def get_fix_patches(self) -> list[dict]:
-        """Get all auto-fixable patches from errors"""
-        patches = []
-        for err in self.errors:
-            if err.auto_fixable and err.fix_patch:
-                patches.append(err.fix_patch)
-        return patches
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization"""
-        return {
-            "valid": self.valid,
-            "errors": [e.to_structured().to_dict() for e in self.errors],
-            "warnings": [e.to_structured().to_dict() for e in self.warnings],
-            "fix_patches": self.get_fix_patches(),
-        }
-
-
-def generate_fix_patches(errors: list[ValidationError]) -> list[dict]:
-    """
-    Generate JSON Patch format fixes that Claude Code can apply directly.
-
-    Args:
-        errors: List of validation errors
-
-    Returns:
-        List of JSON Patch operations:
-        [
-            {"op": "replace", "path": "/state/entities/Invoice/fields/status/type",
-             "value": {"enum": ["draft", "open", "closed"]}},
-            {"op": "add", "path": "/state/sagas/payment/steps/0/forward",
-             "value": "process_payment"},
-        ]
-    """
-    patches = []
-    for err in errors:
-        if err.auto_fixable and err.fix_patch:
-            patches.append(err.fix_patch)
-        else:
-            # Try to generate fix based on error type
-            suggested = suggest_fix_for_error(err)
-            if suggested:
-                patches.append(suggested)
-    return patches
-
-
-def suggest_fix_for_error(error: ValidationError) -> dict | None:
-    """
-    Phase 0-3: Generate a fix suggestion based on error type.
-
-    Analyzes the error and generates a JSON Patch operation to fix it.
-    """
-    if not error.code:
-        return None
-
-    # TYP-001: Enum value mismatch - suggest closest valid value
-    if error.code == "TYP-001" and error.valid_options:
-        # Find closest match to actual value
-        actual = str(error.actual).lower() if error.actual else ""
-        closest = find_closest_match(actual, error.valid_options)
-        if closest:
-            json_path = _dot_path_to_json_path(error.path)
-            return {
-                "op": "replace",
-                "path": f"{json_path}/value",
-                "value": closest,
-                "reason": f"Replace '{error.actual}' with valid enum value '{closest}'"
-            }
-
-    # REF-002: Invalid reference path - suggest valid field
-    if error.code == "REF-002" and error.valid_options:
-        actual = str(error.actual).lower() if error.actual else ""
-        closest = find_closest_match(actual, error.valid_options)
-        if closest:
-            return {
-                "op": "replace",
-                "path": _dot_path_to_json_path(error.path),
-                "value": f"Use '{closest}' instead of '{error.actual}'",
-                "reason": f"Field '{error.actual}' not found, did you mean '{closest}'?"
-            }
-
-    # TRANS-001: Transition conflict - suggest adding guard
-    if error.code == "TRANS-001":
-        return {
-            "op": "add",
-            "path": f"{_dot_path_to_json_path(error.path)}/guard",
-            "value": {"type": "literal", "value": True},
-            "reason": "Add guard condition to resolve transition conflict"
-        }
-
-    return None
-
-
-def find_closest_match(target: str, options: list[str]) -> str | None:
-    """Find the closest matching string from options using simple similarity."""
-    if not options:
-        return None
-
-    target_lower = target.lower()
-
-    # Exact match (case-insensitive)
-    for opt in options:
-        if opt.lower() == target_lower:
-            return opt
-
-    # Prefix match
-    for opt in options:
-        if opt.lower().startswith(target_lower) or target_lower.startswith(opt.lower()):
-            return opt
-
-    # Substring match
-    for opt in options:
-        if target_lower in opt.lower() or opt.lower() in target_lower:
-            return opt
-
-    # Return first option as fallback
-    return options[0] if options else None
-
-
-def _dot_path_to_json_path(dot_path: str) -> str:
-    """Convert dot notation path to JSON Patch path format."""
-    # e.g., "functions.check.pre[0].expr" -> "/functions/check/pre/0/expr"
-    import re
-    # Replace array indices
-    path = re.sub(r'\[(\d+)\]', r'/\1', dot_path)
-    # Replace dots with slashes
-    path = path.replace('.', '/')
-    # Ensure starts with /
-    if not path.startswith('/'):
-        path = '/' + path
-    return path
-
-
-def validate_changes(base_spec: dict, changes: list[dict], validator: "MeshValidator" = None) -> "ValidationResult":
-    """
-    Phase 0-5: Incremental validation - validate only changed portions.
-
-    Applies JSON Patch changes to the base spec and validates the affected areas.
-    More efficient than full validation for large specs with small changes.
-
-    Args:
-        base_spec: The base TRIR specification
-        changes: List of JSON Patch operations:
-            [{"op": "replace", "path": "/functions/foo/description", "value": "..."}]
-        validator: Optional MeshValidator instance (creates new one if not provided)
-
-    Returns:
-        ValidationResult with errors only from affected areas
-    """
-    import copy
-
-    if validator is None:
-        validator = MeshValidator()
-
-    # Apply changes to get the new spec
-    new_spec = copy.deepcopy(base_spec)
-
-    for change in changes:
-        op = change.get("op", "")
-        path = change.get("path", "")
-        value = change.get("value")
-
-        # Parse JSON Patch path
-        path_parts = [p for p in path.split("/") if p]
-
-        if not path_parts:
-            continue
-
-        try:
-            if op == "add":
-                _apply_add(new_spec, path_parts, value)
-            elif op == "replace":
-                _apply_replace(new_spec, path_parts, value)
-            elif op == "remove":
-                _apply_remove(new_spec, path_parts)
-        except (KeyError, IndexError, TypeError):
-            # Skip invalid patches
-            continue
-
-    # Determine affected areas and validate
-    affected_paths = set()
-    for change in changes:
-        path = change.get("path", "")
-        # Extract top-level affected area (e.g., /functions/foo -> functions)
-        parts = [p for p in path.split("/") if p]
-        if parts:
-            affected_paths.add(parts[0])
-            if len(parts) > 1:
-                affected_paths.add(f"{parts[0]}.{parts[1]}")
-
-    # Full validation on the new spec
-    result = validator.validate(new_spec)
-
-    # Filter errors to only those in affected areas (optional optimization)
-    # For now, return all errors to ensure correctness
-    return result
-
-
-def _apply_add(obj: dict, path_parts: list[str], value) -> None:
-    """Apply JSON Patch 'add' operation"""
-    for part in path_parts[:-1]:
-        if part.isdigit():
-            obj = obj[int(part)]
-        else:
-            obj = obj[part]
-    final = path_parts[-1]
-    if final.isdigit():
-        obj.insert(int(final), value)
-    else:
-        obj[final] = value
-
-
-def _apply_replace(obj: dict, path_parts: list[str], value) -> None:
-    """Apply JSON Patch 'replace' operation"""
-    for part in path_parts[:-1]:
-        if part.isdigit():
-            obj = obj[int(part)]
-        else:
-            obj = obj[part]
-    final = path_parts[-1]
-    if final.isdigit():
-        obj[int(final)] = value
-    else:
-        obj[final] = value
-
-
-def _apply_remove(obj: dict, path_parts: list[str]) -> None:
-    """Apply JSON Patch 'remove' operation"""
-    for part in path_parts[:-1]:
-        if part.isdigit():
-            obj = obj[int(part)]
-        else:
-            obj = obj[part]
-    final = path_parts[-1]
-    if final.isdigit():
-        del obj[int(final)]
-    else:
-        del obj[final]
-
-
-def suggest_completions(partial_spec: dict) -> list[dict]:
-    """
-    Phase 0-4: Generate completion suggestions for missing required fields.
-
-    Analyzes a partial spec and suggests completions for missing fields.
-
-    Args:
-        partial_spec: A partial TRIR specification
-
-    Returns:
-        List of completion suggestions:
-        [
-            {"path": "/state/sagas/payment/steps/0/forward",
-             "suggestion": "process_payment",
-             "reason": "SagaStep requires 'forward' field"},
-        ]
-    """
-    suggestions = []
-
-    # Check meta section
-    meta = partial_spec.get("meta", {})
-    if not meta.get("id"):
-        suggestions.append({
-            "path": "/meta/id",
-            "suggestion": "my-spec",
-            "reason": "Meta requires 'id' field"
-        })
-    if not meta.get("version"):
-        suggestions.append({
-            "path": "/meta/version",
-            "suggestion": "1.0.0",
-            "reason": "Meta requires 'version' field"
-        })
-    if not meta.get("title"):
-        suggestions.append({
-            "path": "/meta/title",
-            "suggestion": "My Specification",
-            "reason": "Meta requires 'title' field"
-        })
-
-    # Check sagas
-    for saga_name, saga in partial_spec.get("sagas", {}).items():
-        steps = saga.get("steps", [])
-        for i, step in enumerate(steps):
-            if not step.get("forward"):
-                suggestions.append({
-                    "path": f"/sagas/{saga_name}/steps/{i}/forward",
-                    "suggestion": f"{step.get('name', 'step')}_action",
-                    "reason": "SagaStep requires 'forward' field"
-                })
-            if not step.get("name"):
-                suggestions.append({
-                    "path": f"/sagas/{saga_name}/steps/{i}/name",
-                    "suggestion": f"step_{i + 1}",
-                    "reason": "SagaStep requires 'name' field"
-                })
-
-    # Check functions
-    for func_name, func in partial_spec.get("functions", {}).items():
-        if not func.get("description"):
-            suggestions.append({
-                "path": f"/functions/{func_name}/description",
-                "suggestion": f"Performs {func_name} operation",
-                "reason": "Function requires 'description' field"
-            })
-        if "input" not in func:
-            suggestions.append({
-                "path": f"/functions/{func_name}/input",
-                "suggestion": {},
-                "reason": "Function requires 'input' field (can be empty object)"
-            })
-
-        # Check post actions
-        for i, post in enumerate(func.get("post", [])):
-            action = post.get("action", {})
-            if action.get("update") and not action.get("target"):
-                suggestions.append({
-                    "path": f"/functions/{func_name}/post/{i}/action/target",
-                    "suggestion": {"type": "input", "name": "id"},
-                    "reason": "UpdateAction requires 'target' field"
-                })
-
-    # Check state machines
-    for sm_name, sm in partial_spec.get("stateMachines", {}).items():
-        if not sm.get("initial"):
-            states = list(sm.get("states", {}).keys())
-            suggestions.append({
-                "path": f"/stateMachines/{sm_name}/initial",
-                "suggestion": states[0] if states else "INITIAL",
-                "reason": "StateMachine requires 'initial' field"
-            })
-
-    # Check derived formulas
-    for derived_name, derived in partial_spec.get("derived", {}).items():
-        if not derived.get("returns"):
-            suggestions.append({
-                "path": f"/derived/{derived_name}/returns",
-                "suggestion": "string",
-                "reason": "DerivedFormula requires 'returns' field"
-            })
-        if not derived.get("entity"):
-            suggestions.append({
-                "path": f"/derived/{derived_name}/entity",
-                "suggestion": "Entity",
-                "reason": "DerivedFormula requires 'entity' field"
-            })
-
-    # Check entities
-    for entity_name, entity in partial_spec.get("state", {}).items():
-        if not entity.get("fields"):
-            suggestions.append({
-                "path": f"/state/{entity_name}/fields",
-                "suggestion": {"id": {"type": "string"}},
-                "reason": "Entity should have at least one field"
-            })
-
-    return suggestions
-
-
-class MeshValidator:
+class MeshValidator(
+    StateMachineValidationMixin,
+    SagaValidationMixin,
+    PolicyValidationMixin,
+    MiscValidationMixin,
+):
     """Validates TRIR specifications against JSON Schema"""
 
     def __init__(self, schema_dir: Path | None = None, enable_cache: bool = True):
@@ -889,6 +415,18 @@ class MeshValidator:
         # 18. Reference path validation (Phase 2-4)
         ref_path_errors = self._validate_reference_paths(spec)
         errors.extend(ref_path_errors)
+
+        # 19. Frontend view validation (FE-002, FE-003)
+        view_errors = self._validate_views(spec)
+        errors.extend(view_errors)
+
+        # 20. Frontend route validation (FE-004)
+        route_errors = self._validate_routes(spec)
+        errors.extend(route_errors)
+
+        # 21. Unused function warning (FE-005)
+        unused_warnings = self._detect_unused_functions(spec)
+        warnings.extend(unused_warnings)
 
         return ValidationResult(
             valid=len(errors) == 0,
@@ -1412,89 +950,6 @@ class MeshValidator:
 
         return errors
 
-    def _validate_state_machines(self, spec: dict) -> tuple[list[ValidationError], list[ValidationError]]:
-        """Validate state machine definitions (VAL-003, VAL-004)"""
-        errors = []
-        warnings = []
-        functions = spec.get("functions", {})
-        events = spec.get("events", {})
-
-        for sm_name, sm in spec.get("stateMachines", {}).items():
-            states = sm.get("states", {})
-            transitions = sm.get("transitions", [])
-            initial = sm.get("initial", "")
-
-            # VAL-003: Validate trigger references exist
-            for i, trans in enumerate(transitions):
-                trigger = trans.get("trigger_function")
-                if trigger:
-                    if trigger not in functions and trigger not in events:
-                        errors.append(ValidationError(
-                            path=f"stateMachines.{sm_name}.transitions[{i}]",
-                            message=f"Trigger '{trigger}' not found in functions or events"
-                        ))
-
-            # VAL-004: Reachability analysis
-            # Find all reachable states from initial
-            reachable = set()
-            if initial:
-                reachable.add(initial)
-                changed = True
-                while changed:
-                    changed = False
-                    for trans in transitions:
-                        from_state = trans.get("from")
-                        to_state = trans.get("to")
-                        if from_state in reachable and to_state not in reachable:
-                            reachable.add(to_state)
-                            changed = True
-
-            # Check for unreachable states
-            all_states = set(states.keys())
-            unreachable = all_states - reachable
-            if unreachable:
-                warnings.append(ValidationError(
-                    path=f"stateMachines.{sm_name}",
-                    message=f"Unreachable states: {', '.join(sorted(unreachable))}",
-                    severity="warning"
-                ))
-
-            # Check for dead-end states (non-final states with no outgoing transitions)
-            from_states = {trans.get("from") for trans in transitions}
-            final_states = {name for name, state in states.items() if state.get("final")}
-            dead_ends = (all_states - from_states) - final_states
-
-            if dead_ends:
-                warnings.append(ValidationError(
-                    path=f"stateMachines.{sm_name}",
-                    message=f"Dead-end states (not final, no outgoing transitions): {', '.join(sorted(dead_ends))}",
-                    severity="warning"
-                ))
-
-            # Validate initial state exists
-            if initial and initial not in states:
-                errors.append(ValidationError(
-                    path=f"stateMachines.{sm_name}",
-                    message=f"Initial state '{initial}' not defined in states"
-                ))
-
-            # Validate transition from/to states exist
-            for i, trans in enumerate(transitions):
-                from_state = trans.get("from")
-                to_state = trans.get("to")
-                if from_state and from_state not in states:
-                    errors.append(ValidationError(
-                        path=f"stateMachines.{sm_name}.transitions[{i}]",
-                        message=f"Transition 'from' state '{from_state}' not defined"
-                    ))
-                if to_state and to_state not in states:
-                    errors.append(ValidationError(
-                        path=f"stateMachines.{sm_name}.transitions[{i}]",
-                        message=f"Transition 'to' state '{to_state}' not defined"
-                    ))
-
-        return errors, warnings
-
     def _validate_expressions(self, spec: dict) -> list[ValidationError]:
         """Validate expression ASTs (Tagged Union format)"""
         errors = []
@@ -1794,554 +1249,6 @@ class MeshValidator:
 
         return warnings
 
-    def _validate_gateways(self, spec: dict) -> list[ValidationError]:
-        """
-        Validate gateway definitions (Phase 2 - BPMN-style workflow control).
-
-        Checks:
-        1. Gateway type is valid (exclusive, parallel, inclusive, event_based)
-        2. Outgoing flow targets exist (functions, other gateways, or events)
-        3. Exclusive/inclusive gateways have proper conditions
-        4. Parallel gateways don't have conditions on outgoing flows
-        5. Event-based gateways reference valid events
-        """
-        errors = []
-        gateways = spec.get("gateways", {})
-        functions = spec.get("functions", {})
-        events = spec.get("events", {})
-
-        valid_gateway_types = ["exclusive", "parallel", "inclusive", "event_based"]
-
-        for gw_name, gw in gateways.items():
-            gw_type = gw.get("type", "")
-
-            # Validate gateway type
-            if gw_type and gw_type not in valid_gateway_types:
-                errors.append(ValidationError(
-                    path=f"gateways.{gw_name}.type",
-                    message=f"Invalid gateway type '{gw_type}'. Valid types: {', '.join(valid_gateway_types)}"
-                ))
-
-            # Validate outgoing flows
-            for i, flow in enumerate(gw.get("outgoingFlows", [])):
-                target = flow.get("target", "")
-
-                # Target should be a function, event, or another gateway
-                if target:
-                    if target not in functions and target not in events and target not in gateways:
-                        errors.append(ValidationError(
-                            path=f"gateways.{gw_name}.outgoingFlows[{i}].target",
-                            message=f"Outgoing flow target '{target}' not found in functions, events, or gateways"
-                        ))
-
-                # Exclusive/inclusive gateways should have conditions (except default)
-                if gw_type in ["exclusive", "inclusive"]:
-                    if not flow.get("condition") and not flow.get("default"):
-                        # Warning might be more appropriate, but we treat as error for strictness
-                        pass  # Allow condition-less flows for flexibility
-
-                # Parallel gateways should NOT have conditions
-                if gw_type == "parallel" and flow.get("condition"):
-                    errors.append(ValidationError(
-                        path=f"gateways.{gw_name}.outgoingFlows[{i}]",
-                        message="Parallel gateway flows should not have conditions - all paths execute"
-                    ))
-
-                # Event-based gateways should reference events
-                if gw_type == "event_based":
-                    event_ref = flow.get("event", "")
-                    if event_ref and event_ref not in events:
-                        errors.append(ValidationError(
-                            path=f"gateways.{gw_name}.outgoingFlows[{i}].event",
-                            message=f"Event-based gateway references unknown event '{event_ref}'"
-                        ))
-
-            # Validate incoming flow references
-            for i, flow in enumerate(gw.get("incomingFlows", [])):
-                source = flow.get("source", "")
-                if source:
-                    if source not in functions and source not in events and source not in gateways:
-                        errors.append(ValidationError(
-                            path=f"gateways.{gw_name}.incomingFlows[{i}].source",
-                            message=f"Incoming flow source '{source}' not found in functions, events, or gateways"
-                        ))
-
-        return errors
-
-    def _validate_deadlines(self, spec: dict) -> list[ValidationError]:
-        """
-        Validate deadline/SLA definitions (Phase 2 - Temporal workflow control).
-
-        Checks:
-        1. Referenced entity exists
-        2. Start condition references valid fields
-        3. Action function exists
-        4. Escalation events exist
-        5. Duration format is valid
-        """
-        errors = []
-        deadlines = spec.get("deadlines", {})
-        entities = spec.get("state", {})
-        functions = spec.get("functions", {})
-        events = spec.get("events", {})
-
-        for dl_name, dl in deadlines.items():
-            # Validate entity reference
-            entity = dl.get("entity", "")
-            if entity and entity not in entities:
-                errors.append(ValidationError(
-                    path=f"deadlines.{dl_name}.entity",
-                    message=f"Deadline references unknown entity '{entity}'"
-                ))
-
-            # Validate start condition field references
-            start_when = dl.get("startWhen", {})
-            if start_when and entity and entity in entities:
-                entity_fields = entities[entity].get("fields", {})
-                field = start_when.get("field", "")
-                if field and field not in entity_fields:
-                    errors.append(ValidationError(
-                        path=f"deadlines.{dl_name}.startWhen.field",
-                        message=f"Start condition field '{field}' not found in entity '{entity}'"
-                    ))
-
-            # Validate action function reference
-            action = dl.get("action", "")
-            if action and action not in functions:
-                errors.append(ValidationError(
-                    path=f"deadlines.{dl_name}.action",
-                    message=f"Deadline action references unknown function '{action}'"
-                ))
-
-            # Validate escalation events
-            for i, esc in enumerate(dl.get("escalations", [])):
-                event_ref = esc.get("event", "")
-                if event_ref and event_ref not in events:
-                    errors.append(ValidationError(
-                        path=f"deadlines.{dl_name}.escalations[{i}].event",
-                        message=f"Escalation references unknown event '{event_ref}'"
-                    ))
-
-                # Validate escalation action
-                esc_action = esc.get("action", "")
-                if esc_action and esc_action not in functions:
-                    errors.append(ValidationError(
-                        path=f"deadlines.{dl_name}.escalations[{i}].action",
-                        message=f"Escalation action references unknown function '{esc_action}'"
-                    ))
-
-            # Validate duration format (ISO 8601 duration pattern)
-            duration = dl.get("duration", "")
-            if duration:
-                import re
-                # Simple ISO 8601 duration pattern: P[n]Y[n]M[n]DT[n]H[n]M[n]S or shortcuts like "24h", "7d"
-                iso_pattern = r'^P(\d+Y)?(\d+M)?(\d+D)?(T(\d+H)?(\d+M)?(\d+S)?)?$'
-                shortcut_pattern = r'^\d+[hdwms]$'  # 24h, 7d, 1w, 30m, 60s
-                if not re.match(iso_pattern, duration, re.I) and not re.match(shortcut_pattern, duration, re.I):
-                    errors.append(ValidationError(
-                        path=f"deadlines.{dl_name}.duration",
-                        message=f"Invalid duration format '{duration}'. Use ISO 8601 (P1D, PT2H) or shortcut (24h, 7d)"
-                    ))
-
-        return errors
-
-    def _validate_roles(self, spec: dict) -> tuple[list[ValidationError], list[ValidationError]]:
-        """
-        Validate role and permission definitions (Phase 3 - Security layer).
-
-        Checks:
-        1. Circular inheritance detection
-        2. EntityPermission entity references
-        3. EntityPermission operation validity
-        4. Permission-function consistency
-        """
-        errors = []
-        warnings = []
-        roles = spec.get("roles", {})
-        entities = spec.get("state", {})
-        functions = spec.get("functions", {})
-
-        # Valid entity operations
-        valid_operations = ["read", "create", "update", "delete", "list"]
-
-        # Build inheritance graph for cycle detection
-        inheritance_graph = {}
-        for role_name, role in roles.items():
-            inheritance_graph[role_name] = role.get("inherits", [])
-
-        # Detect circular inheritance
-        def detect_cycle(role: str, visited: set, rec_stack: set) -> list[str] | None:
-            visited.add(role)
-            rec_stack.add(role)
-
-            for parent in inheritance_graph.get(role, []):
-                if parent not in roles:
-                    # Already validated in _validate_references
-                    continue
-                if parent not in visited:
-                    cycle = detect_cycle(parent, visited, rec_stack)
-                    if cycle is not None:
-                        return [role] + cycle
-                elif parent in rec_stack:
-                    return [role, parent]
-
-            rec_stack.remove(role)
-            return None
-
-        visited = set()
-        for role_name in roles:
-            if role_name not in visited:
-                cycle = detect_cycle(role_name, visited, set())
-                if cycle:
-                    errors.append(ValidationError(
-                        path="roles",
-                        message=f"Circular role inheritance detected: {' -> '.join(cycle)}"
-                    ))
-                    break
-
-        # Validate each role
-        for role_name, role in roles.items():
-            # Validate entityPermissions
-            for i, ep in enumerate(role.get("entityPermissions", [])):
-                entity = ep.get("entity", "")
-
-                # Check entity exists
-                if entity and entity not in entities:
-                    errors.append(ValidationError(
-                        path=f"roles.{role_name}.entityPermissions[{i}]",
-                        message=f"Entity permission references unknown entity '{entity}'"
-                    ))
-
-                # Check operations are valid
-                operations = ep.get("operations", [])
-                for op in operations:
-                    if op not in valid_operations:
-                        errors.append(ValidationError(
-                            path=f"roles.{role_name}.entityPermissions[{i}].operations",
-                            message=f"Invalid operation '{op}'. Valid: {', '.join(valid_operations)}"
-                        ))
-
-            # Validate permissions reference existing functions (if naming convention matches)
-            permissions = role.get("permissions", [])
-            for perm in permissions:
-                # Convention: permission name may match function name
-                # e.g., "execute_clearing" permission grants access to execute_clearing function
-                if perm in functions:
-                    # Permission matches a function - this is valid
-                    pass
-
-        return errors, warnings
-
-    def _validate_audit_policies(self, spec: dict) -> list[ValidationError]:
-        """
-        Validate audit policy definitions (Phase 3 - Audit layer).
-
-        Checks:
-        1. Entity reference exists
-        2. Fields reference exists in entity (unless 'all')
-        3. Operations are valid
-        """
-        errors = []
-        audit_policies = spec.get("auditPolicies", {})
-        entities = spec.get("state", {})
-
-        valid_operations = ["create", "update", "delete", "read"]
-
-        for policy_name, policy in audit_policies.items():
-            entity = policy.get("entity", "")
-
-            # Entity reference already validated in _validate_references
-            # Additional: validate fields reference
-            if entity and entity in entities:
-                entity_fields = entities[entity].get("fields", {})
-                policy_fields = policy.get("fields", [])
-
-                for field in policy_fields:
-                    if field != "all" and field not in entity_fields:
-                        errors.append(ValidationError(
-                            path=f"auditPolicies.{policy_name}.fields",
-                            message=f"Audit policy references unknown field '{field}' in entity '{entity}'"
-                        ))
-
-            # Validate operations
-            operations = policy.get("operations", [])
-            for op in operations:
-                if op not in valid_operations:
-                    errors.append(ValidationError(
-                        path=f"auditPolicies.{policy_name}.operations",
-                        message=f"Invalid audit operation '{op}'. Valid: {', '.join(valid_operations)}"
-                    ))
-
-        return errors
-
-    def _validate_external_services(self, spec: dict) -> list[ValidationError]:
-        """
-        Validate external service definitions (Phase 4 - External layer).
-
-        Checks:
-        1. BaseUrl format validation
-        2. Authentication type validity
-        3. HTTP method validity
-        4. Retry policy validity
-        """
-        errors = []
-        services = spec.get("externalServices", {})
-
-        valid_auth_types = ["none", "bearer", "basic", "api_key", "oauth2"]
-        valid_http_methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
-        valid_service_types = ["rest", "graphql", "grpc", "soap"]
-
-        import re
-        url_pattern = re.compile(r'^https?://[^\s/$.?#].[^\s]*$', re.I)
-
-        for svc_name, svc in services.items():
-            # Validate baseUrl
-            base_url = svc.get("baseUrl", "")
-            if base_url and not url_pattern.match(base_url):
-                errors.append(ValidationError(
-                    path=f"externalServices.{svc_name}.baseUrl",
-                    message=f"Invalid base URL format: '{base_url}'"
-                ))
-
-            # Validate service type
-            svc_type = svc.get("type", "rest")
-            if svc_type not in valid_service_types:
-                errors.append(ValidationError(
-                    path=f"externalServices.{svc_name}.type",
-                    message=f"Invalid service type '{svc_type}'. Valid: {', '.join(valid_service_types)}"
-                ))
-
-            # Validate authentication type (from 'auth' or 'authentication')
-            auth = svc.get("auth", svc.get("authentication", {}))
-            if auth:
-                auth_type = auth.get("type", "")
-                if auth_type and auth_type not in valid_auth_types:
-                    errors.append(ValidationError(
-                        path=f"externalServices.{svc_name}.authentication.type",
-                        message=f"Invalid auth type '{auth_type}'. Valid: {', '.join(valid_auth_types)}"
-                    ))
-
-            # Validate operations
-            for op_name, op in svc.get("operations", {}).items():
-                method = op.get("method", "")
-                if method and method not in valid_http_methods:
-                    errors.append(ValidationError(
-                        path=f"externalServices.{svc_name}.operations.{op_name}.method",
-                        message=f"Invalid HTTP method '{method}'. Valid: {', '.join(valid_http_methods)}"
-                    ))
-
-            # Validate retry policy
-            retry = svc.get("retry", svc.get("retryPolicy", {}))
-            if retry:
-                max_attempts = retry.get("maxAttempts", 3)
-                if not isinstance(max_attempts, int) or max_attempts < 1:
-                    errors.append(ValidationError(
-                        path=f"externalServices.{svc_name}.retryPolicy.maxAttempts",
-                        message=f"maxAttempts must be a positive integer"
-                    ))
-
-        return errors
-
-    def _validate_data_policies(self, spec: dict) -> list[ValidationError]:
-        """
-        Validate data policy definitions (Phase 4 - Data layer).
-
-        Checks:
-        1. Entity reference exists
-        2. PII fields exist in entity
-        3. Masking fields exist in entity
-        4. Retention period format
-        """
-        errors = []
-        policies = spec.get("dataPolicies", {})
-        entities = spec.get("state", {})
-
-        for policy_name, policy in policies.items():
-            entity = policy.get("entity", "")
-
-            # Entity reference already validated in _validate_references
-            # Additional: validate PII and masking fields
-            if entity and entity in entities:
-                entity_fields = entities[entity].get("fields", {})
-
-                # Validate piiFields
-                pii_fields = policy.get("piiFields", [])
-                for field in pii_fields:
-                    if field not in entity_fields:
-                        errors.append(ValidationError(
-                            path=f"dataPolicies.{policy_name}.piiFields",
-                            message=f"PII field '{field}' not found in entity '{entity}'"
-                        ))
-
-                # Validate masking fields
-                masking = policy.get("masking", {})
-                if masking:
-                    masking_fields = masking.get("fields", [])
-                    for field in masking_fields:
-                        if field not in entity_fields:
-                            errors.append(ValidationError(
-                                path=f"dataPolicies.{policy_name}.masking.fields",
-                                message=f"Masking field '{field}' not found in entity '{entity}'"
-                            ))
-
-                    # Validate masking strategy
-                    valid_strategies = ["partial", "full", "hash", "redact"]
-                    strategy = masking.get("strategy", "")
-                    if strategy and strategy not in valid_strategies:
-                        errors.append(ValidationError(
-                            path=f"dataPolicies.{policy_name}.masking.strategy",
-                            message=f"Invalid masking strategy '{strategy}'. Valid: {', '.join(valid_strategies)}"
-                        ))
-
-            # Validate retention period format (basic check)
-            retention = policy.get("retention", {})
-            if retention:
-                period = retention.get("period", "")
-                if period:
-                    # Simple pattern: number + unit (e.g., "7 years", "90 days", "1 year")
-                    import re
-                    period_pattern = r'^\d+\s*(year|years|month|months|day|days|week|weeks)$'
-                    if not re.match(period_pattern, period, re.I):
-                        errors.append(ValidationError(
-                            path=f"dataPolicies.{policy_name}.retention.period",
-                            message=f"Invalid retention period format '{period}'. Use format like '7 years', '90 days'"
-                        ))
-
-        return errors
-
-    def _validate_schedules(self, spec: dict) -> list[ValidationError]:
-        """
-        Validate schedule definitions (Phase 5 - Temporal layer).
-
-        Checks:
-        1. Cron expression format
-        2. Timezone validity
-        3. Action function reference
-        4. Overlap policy validity
-        """
-        errors = []
-        schedules = spec.get("schedules", {})
-        functions = spec.get("functions", {})
-
-        import re
-        # Cron expression: 5 or 6 fields (second minute hour day month weekday [year])
-        # Simple validation - check field count and basic patterns
-        cron_field_pattern = r'^(\*|[0-9,\-\/\*]+)$'
-
-        valid_overlap_policies = ["skip", "buffer_one", "cancel_other", "allow_all"]
-
-        # Common timezones (not exhaustive, but covers major ones)
-        common_timezones = [
-            "UTC", "GMT",
-            "Asia/Tokyo", "Asia/Shanghai", "Asia/Seoul", "Asia/Singapore",
-            "America/New_York", "America/Los_Angeles", "America/Chicago",
-            "Europe/London", "Europe/Paris", "Europe/Berlin",
-            "Australia/Sydney", "Pacific/Auckland"
-        ]
-
-        for sched_name, sched in schedules.items():
-            # Validate cron expression
-            cron = sched.get("cron", "")
-            if cron:
-                fields = cron.split()
-                if len(fields) < 5 or len(fields) > 6:
-                    errors.append(ValidationError(
-                        path=f"schedules.{sched_name}.cron",
-                        message=f"Invalid cron expression '{cron}'. Expected 5 or 6 fields (minute hour day month weekday [year])"
-                    ))
-                else:
-                    for i, field in enumerate(fields):
-                        if not re.match(cron_field_pattern, field):
-                            errors.append(ValidationError(
-                                path=f"schedules.{sched_name}.cron",
-                                message=f"Invalid cron field '{field}' at position {i}"
-                            ))
-                            break
-
-            # Validate timezone
-            timezone = sched.get("timezone", "")
-            if timezone and timezone not in common_timezones:
-                # Warning level - timezone might be valid but not in our list
-                # For now, just check format (Region/City or abbreviation)
-                tz_pattern = r'^[A-Za-z]+(/[A-Za-z_]+)?$'
-                if not re.match(tz_pattern, timezone):
-                    errors.append(ValidationError(
-                        path=f"schedules.{sched_name}.timezone",
-                        message=f"Invalid timezone format '{timezone}'. Use IANA format like 'Asia/Tokyo'"
-                    ))
-
-            # Validate action function reference
-            action = sched.get("action", "")
-            if action and action not in functions:
-                errors.append(ValidationError(
-                    path=f"schedules.{sched_name}.action",
-                    message=f"Schedule references unknown function '{action}'"
-                ))
-
-            # Validate overlap policy
-            overlap = sched.get("overlapPolicy", "")
-            if overlap and overlap not in valid_overlap_policies:
-                errors.append(ValidationError(
-                    path=f"schedules.{sched_name}.overlapPolicy",
-                    message=f"Invalid overlap policy '{overlap}'. Valid: {', '.join(valid_overlap_policies)}"
-                ))
-
-        return errors
-
-    def _validate_constraints(self, spec: dict) -> list[ValidationError]:
-        """
-        Validate constraint definitions (Phase 5 - Data integrity layer).
-
-        Checks:
-        1. Entity reference exists
-        2. Fields exist in entity (for unique constraints)
-        3. Expression references valid fields (for check constraints)
-        4. Constraint type validity
-        """
-        errors = []
-        constraints = spec.get("constraints", {})
-        entities = spec.get("state", {})
-
-        valid_constraint_types = ["unique", "check", "foreign_key"]
-
-        for const_name, const in constraints.items():
-            entity = const.get("entity", "")
-            const_type = const.get("type", "")
-
-            # Validate constraint type
-            if const_type and const_type not in valid_constraint_types:
-                errors.append(ValidationError(
-                    path=f"constraints.{const_name}.type",
-                    message=f"Invalid constraint type '{const_type}'. Valid: {', '.join(valid_constraint_types)}"
-                ))
-
-            # Entity reference already validated in _validate_references
-            # Additional: validate fields for unique constraints
-            if entity and entity in entities:
-                entity_fields = entities[entity].get("fields", {})
-
-                # For unique constraints, check that all fields exist
-                if const_type == "unique":
-                    const_fields = const.get("fields", [])
-                    for field in const_fields:
-                        if field not in entity_fields:
-                            errors.append(ValidationError(
-                                path=f"constraints.{const_name}.fields",
-                                message=f"Unique constraint field '{field}' not found in entity '{entity}'"
-                            ))
-
-                # For foreign_key constraints, check reference
-                if const_type == "foreign_key":
-                    fk_fields = const.get("fields", [])
-                    ref_entity = const.get("references", {}).get("entity", "")
-                    if ref_entity and ref_entity not in entities:
-                        errors.append(ValidationError(
-                            path=f"constraints.{const_name}.references.entity",
-                            message=f"Foreign key references unknown entity '{ref_entity}'"
-                        ))
-
-        return errors
-
     def _validate_enum_usage(self, spec: dict) -> list[ValidationError]:
         """
         Phase 2-1: Validate that literal values match Enum definitions.
@@ -2607,85 +1514,6 @@ class MeshValidator:
 
         return errors
 
-    def _validate_sagas(self, spec: dict) -> list[ValidationError]:
-        """
-        Validate saga definitions (Phase 5 - Workflow layer).
-
-        Checks:
-        1. Step action function references
-        2. Step compensation function references
-        3. Step order consistency
-        4. OnFailure policy validity
-        """
-        errors = []
-        sagas = spec.get("sagas", {})
-        functions = spec.get("functions", {})
-
-        valid_failure_policies = ["compensate_all", "compensate_completed", "fail_fast", "continue"]
-
-        for saga_name, saga in sagas.items():
-            steps = saga.get("steps", [])
-
-            # Track step names for order validation
-            step_names = set()
-
-            for i, step in enumerate(steps):
-                step_name = step.get("name", f"step_{i}")
-
-                # Check for duplicate step names
-                if step_name in step_names:
-                    errors.append(ValidationError(
-                        path=f"sagas.{saga_name}.steps[{i}]",
-                        message=f"Duplicate step name '{step_name}'"
-                    ))
-                step_names.add(step_name)
-
-                # Validate forward function (already validated in _validate_references)
-                # Additional: check that forward has corresponding compensate
-                forward = step.get("forward", "")
-                compensate = step.get("compensate", "")
-
-                # If forward modifies state, compensate should exist
-                if forward and forward in functions:
-                    func = functions[forward]
-                    has_side_effects = bool(func.get("post", []))
-                    if has_side_effects and not compensate:
-                        # This is more of a warning, but we'll report it
-                        pass  # Could add warning here
-
-                # Validate compensate function if specified
-                if compensate and compensate not in functions:
-                    errors.append(ValidationError(
-                        path=f"sagas.{saga_name}.steps[{i}].compensate",
-                        message=f"Compensate function '{compensate}' not found"
-                    ))
-
-                # Validate step dependencies (if any)
-                depends_on = step.get("dependsOn", [])
-                for dep in depends_on:
-                    if dep not in step_names:
-                        # Dependency must be a previous step
-                        found = False
-                        for j in range(i):
-                            if steps[j].get("name") == dep:
-                                found = True
-                                break
-                        if not found:
-                            errors.append(ValidationError(
-                                path=f"sagas.{saga_name}.steps[{i}].dependsOn",
-                                message=f"Step dependency '{dep}' not found or defined after current step"
-                            ))
-
-            # Validate onFailure policy
-            on_failure = saga.get("onFailure", "")
-            if on_failure and on_failure not in valid_failure_policies:
-                errors.append(ValidationError(
-                    path=f"sagas.{saga_name}.onFailure",
-                    message=f"Invalid failure policy '{on_failure}'. Valid: {', '.join(valid_failure_policies)}"
-                ))
-
-        return errors
-
     def _validate_function_type_consistency(self, spec: dict) -> list[ValidationError]:
         """
         Phase 2-2: Validate function input/output type consistency.
@@ -2855,65 +1683,6 @@ class MeshValidator:
 
         return True  # Default to compatible for unknown types
 
-    def _validate_transition_conflicts(self, spec: dict) -> list[ValidationError]:
-        """
-        Phase 2-3: Detect conflicting state transitions.
-
-        Validates:
-        - No two transitions from the same state with the same trigger and overlapping guards
-        - Deterministic transition behavior
-
-        Returns StructuredError with code TRANS-001 for conflicts.
-        """
-        errors = []
-        state_machines = spec.get("stateMachines", {})
-
-        for sm_name, sm in state_machines.items():
-            transitions = sm.get("transitions", [])
-
-            # Group transitions by (from_state, trigger_function)
-            transition_groups: dict[tuple[str, str], list[tuple[int, dict]]] = {}
-
-            for i, trans in enumerate(transitions):
-                from_state = trans.get("from", "")
-                trigger = trans.get("trigger_function", trans.get("event", ""))
-
-                if not trigger:
-                    continue
-
-                key = (from_state, trigger)
-                if key not in transition_groups:
-                    transition_groups[key] = []
-                transition_groups[key].append((i, trans))
-
-            # Check for conflicts in each group
-            for (from_state, trigger), group in transition_groups.items():
-                if len(group) <= 1:
-                    continue
-
-                # Multiple transitions - check if guards are mutually exclusive
-                has_unguarded = any(not t.get("guard") for _, t in group)
-                guarded_count = sum(1 for _, t in group if t.get("guard"))
-
-                if has_unguarded and len(group) > 1:
-                    # Unguarded transition with other transitions = potential conflict
-                    errors.append(ValidationError(
-                        path=f"stateMachines.{sm_name}.transitions",
-                        message=f"Potential transition conflict: multiple transitions from '{from_state}' "
-                                f"on trigger '{trigger}' with at least one unguarded transition",
-                        code="TRANS-001",
-                        category="logic",
-                        expected="mutually exclusive guards or single transition",
-                        actual=f"{len(group)} transitions, {guarded_count} guarded",
-                        auto_fixable=False
-                    ))
-                elif guarded_count == len(group) and guarded_count > 1:
-                    # All guarded - warning about potential overlap (can't statically verify)
-                    # We'll just note it as informational
-                    pass
-
-        return errors
-
     def _validate_reference_paths(self, spec: dict) -> list[ValidationError]:
         """
         Phase 2-4: Validate deep reference paths.
@@ -3062,3 +1831,249 @@ class MeshValidator:
                     errors.extend(find_refs(trans["guard"], f"stateMachines.{sm_name}.transitions[{i}].guard"))
 
         return errors
+
+    def _validate_views(self, spec: dict) -> list[ValidationError]:
+        """
+        FE-002, FE-003: Validate view definitions.
+
+        Validates:
+        - FE-002: View.entity references a valid entity
+        - FE-002: View.fields[].name references a valid field in the entity
+        - FE-003: View.actions[].function references a valid function
+
+        Returns StructuredError with codes FE-002 or FE-003.
+        """
+        errors = []
+        entities = set(spec.get("state", {}).keys())
+        functions = set(spec.get("functions", {}).keys())
+        views = spec.get("views", {})
+
+        for view_name, view in views.items():
+            # FE-002: Validate entity reference
+            entity_name = view.get("entity", "")
+            if entity_name and entity_name not in entities:
+                errors.append(ValidationError(
+                    path=f"views.{view_name}.entity",
+                    message=f"View '{view_name}' references unknown entity '{entity_name}'",
+                    code="FE-002",
+                    category="reference",
+                    expected=list(entities)[:10] if entities else [],
+                    actual=entity_name
+                ))
+                continue  # Skip field validation if entity is invalid
+
+            # FE-002: Validate field references
+            entity_fields = set()
+            if entity_name and entity_name in spec.get("state", {}):
+                entity_fields = set(spec["state"][entity_name].get("fields", {}).keys())
+
+            for i, field in enumerate(view.get("fields", [])):
+                field_name = field.get("name", "") if isinstance(field, dict) else field
+                if field_name and entity_fields and field_name not in entity_fields:
+                    errors.append(ValidationError(
+                        path=f"views.{view_name}.fields[{i}].name",
+                        message=f"View field '{field_name}' not found in entity '{entity_name}'",
+                        code="FE-002",
+                        category="reference",
+                        expected=list(entity_fields)[:10],
+                        actual=field_name
+                    ))
+
+            # FE-003: Validate action function references
+            for i, action in enumerate(view.get("actions", [])):
+                func_name = action.get("function", "")
+                if func_name and func_name not in functions:
+                    errors.append(ValidationError(
+                        path=f"views.{view_name}.actions[{i}].function",
+                        message=f"View action '{action.get('name', '')}' references unknown function '{func_name}'",
+                        code="FE-003",
+                        category="reference",
+                        expected=list(functions)[:10] if functions else [],
+                        actual=func_name
+                    ))
+
+            # FE-002: Validate filter field references
+            for i, filter_def in enumerate(view.get("filters", [])):
+                filter_field = filter_def.get("field", "")
+                if filter_field and entity_fields and filter_field not in entity_fields:
+                    errors.append(ValidationError(
+                        path=f"views.{view_name}.filters[{i}].field",
+                        message=f"View filter field '{filter_field}' not found in entity '{entity_name}'",
+                        code="FE-002",
+                        category="reference",
+                        expected=list(entity_fields)[:10],
+                        actual=filter_field
+                    ))
+
+            # FE-002: Validate default sort field
+            default_sort = view.get("defaultSort", {})
+            sort_field = default_sort.get("field", "")
+            if sort_field and entity_fields and sort_field not in entity_fields:
+                errors.append(ValidationError(
+                    path=f"views.{view_name}.defaultSort.field",
+                    message=f"Default sort field '{sort_field}' not found in entity '{entity_name}'",
+                    code="FE-002",
+                    category="reference",
+                    expected=list(entity_fields)[:10],
+                    actual=sort_field
+                ))
+
+        return errors
+
+    def _validate_routes(self, spec: dict) -> list[ValidationError]:
+        """
+        FE-004: Validate route definitions.
+
+        Validates:
+        - FE-004: Route.view references a valid view
+        - Route.guards[].role references a valid role (if type is 'role')
+        - Route.guards[].permission references a valid permission (if type is 'permission')
+
+        Returns StructuredError with code FE-004.
+        """
+        errors = []
+        views = set(spec.get("views", {}).keys())
+        roles = set(spec.get("roles", {}).keys())
+        routes = spec.get("routes", {})
+
+        # Collect all permissions from roles
+        all_permissions = set()
+        for role_def in spec.get("roles", {}).values():
+            perms = role_def.get("permissions", [])
+            if isinstance(perms, list):
+                for perm in perms:
+                    if isinstance(perm, str):
+                        all_permissions.add(perm)
+                    elif isinstance(perm, dict):
+                        all_permissions.add(perm.get("name", ""))
+
+        for route_path, route in routes.items():
+            # FE-004: Validate view reference
+            view_name = route.get("view", "")
+            if view_name and view_name not in views:
+                errors.append(ValidationError(
+                    path=f"routes.{route_path}.view",
+                    message=f"Route '{route_path}' references unknown view '{view_name}'",
+                    code="FE-004",
+                    category="reference",
+                    expected=list(views)[:10] if views else [],
+                    actual=view_name
+                ))
+
+            # Validate route guards
+            for i, guard in enumerate(route.get("guards", [])):
+                guard_type = guard.get("type", "")
+
+                # Validate role reference
+                if guard_type == "role":
+                    role_name = guard.get("role", "")
+                    if role_name and roles and role_name not in roles:
+                        errors.append(ValidationError(
+                            path=f"routes.{route_path}.guards[{i}].role",
+                            message=f"Route guard references unknown role '{role_name}'",
+                            code="FE-004",
+                            category="reference",
+                            expected=list(roles)[:10],
+                            actual=role_name
+                        ))
+
+                # Validate permission reference
+                if guard_type == "permission":
+                    perm_name = guard.get("permission", "")
+                    if perm_name and all_permissions and perm_name not in all_permissions:
+                        errors.append(ValidationError(
+                            path=f"routes.{route_path}.guards[{i}].permission",
+                            message=f"Route guard references unknown permission '{perm_name}'",
+                            code="FE-004",
+                            category="reference",
+                            expected=list(all_permissions)[:10],
+                            actual=perm_name
+                        ))
+
+        return errors
+
+    def _detect_unused_functions(self, spec: dict) -> list[ValidationError]:
+        """
+        FE-005: Detect functions that are not used in any view.
+
+        This is a warning (not an error) to help identify functions that may be
+        missing from the UI.
+
+        Returns ValidationError with code FE-005 and severity="warning".
+        """
+        warnings = []
+        functions = set(spec.get("functions", {}).keys())
+        views = spec.get("views", {})
+
+        if not functions or not views:
+            return warnings
+
+        # Collect all functions used in views
+        used_functions = set()
+        for view in views.values():
+            for action in view.get("actions", []):
+                func_name = action.get("function", "")
+                if func_name:
+                    used_functions.add(func_name)
+
+        # Also collect functions used in routes (guards with custom conditions)
+        for route in spec.get("routes", {}).values():
+            for guard in route.get("guards", []):
+                # Custom guards might reference functions in their conditions
+                pass  # For now, we only track view actions
+
+        # Also collect functions used in other places:
+        # - subscriptions handlers
+        for sub in spec.get("subscriptions", {}).values():
+            handler = sub.get("handler", "")
+            if handler:
+                used_functions.add(handler)
+
+        # - saga steps
+        for saga in spec.get("sagas", {}).values():
+            for step in saga.get("steps", []):
+                forward = step.get("forward", "")
+                compensate = step.get("compensate", "")
+                if forward:
+                    used_functions.add(forward)
+                if compensate:
+                    used_functions.add(compensate)
+
+        # - schedule actions
+        for schedule in spec.get("schedules", {}).values():
+            action = schedule.get("action", "")
+            if isinstance(action, str):
+                used_functions.add(action)
+            elif isinstance(action, dict):
+                used_functions.add(action.get("call", ""))
+
+        # - state machine transitions (trigger_function)
+        for sm in spec.get("stateMachines", {}).values():
+            for trans in sm.get("transitions", []):
+                trigger = trans.get("trigger_function", "")
+                if trigger:
+                    used_functions.add(trigger)
+
+        # - deadline actions
+        for deadline in spec.get("deadlines", {}).values():
+            action = deadline.get("action", "")
+            if action:
+                used_functions.add(action)
+
+        # Find unused functions
+        unused = functions - used_functions
+
+        for func_name in sorted(unused):
+            # Skip internal or private functions (starting with _)
+            if func_name.startswith("_"):
+                continue
+
+            warnings.append(ValidationError(
+                path=f"functions.{func_name}",
+                message=f"Function '{func_name}' is not used in any view or integration",
+                code="FE-005",
+                category="usage",
+                severity="warning"
+            ))
+
+        return warnings

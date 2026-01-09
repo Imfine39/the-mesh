@@ -8,7 +8,7 @@ import sys
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from the_mesh.mcp.server import TaskManager
+from the_mesh.mcp.task_manager import TaskManager
 
 
 def test_activate_task_no_folder():

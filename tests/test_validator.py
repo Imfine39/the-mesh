@@ -17,7 +17,9 @@ import sys
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from the_mesh.core.validator import MeshValidator, ValidationError, ValidationResult, generate_fix_patches, suggest_fix_for_error, find_closest_match, suggest_completions, validate_changes
+from the_mesh.core.validator import MeshValidator
+from the_mesh.core.errors import ValidationError, ValidationResult
+from the_mesh.core.utils import generate_fix_patches, suggest_fix_for_error, find_closest_match, suggest_completions, validate_changes
 
 # Try to import pytest, but make it optional
 try:

@@ -2,7 +2,8 @@
 
 __version__ = "0.2.0"
 
-from the_mesh.core.validator import MeshValidator, ValidationResult, StructuredError
+from the_mesh.core.validator import MeshValidator
+from the_mesh.core.errors import ValidationResult, StructuredError
 from the_mesh.graph.graph import DependencyGraph
 from the_mesh.config.project import ProjectConfig
 

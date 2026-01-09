@@ -916,6 +916,174 @@
       },
       "required": ["entity"],
       "additionalProperties": false
+    },
+
+    "ViewField": {
+      "type": "object",
+      "description": "Field definition in a view",
+      "properties": {
+        "name": { "type": "string", "description": "Field name from entity" },
+        "label": { "type": "string", "description": "Display label" },
+        "format": {
+          "type": "string",
+          "enum": ["text", "number", "currency", "date", "datetime", "boolean", "badge", "link"],
+          "default": "text",
+          "description": "Display format"
+        },
+        "sortable": { "type": "boolean", "default": true },
+        "filterable": { "type": "boolean", "default": false },
+        "hidden": { "type": "boolean", "default": false },
+        "width": { "type": "string", "description": "Column width (e.g., '100px', '20%')" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+
+    "ViewAction": {
+      "type": "object",
+      "description": "Action button/link in a view",
+      "properties": {
+        "name": { "type": "string", "description": "Action identifier" },
+        "label": { "type": "string", "description": "Button label" },
+        "function": { "type": "string", "description": "Function to call" },
+        "icon": { "type": "string", "description": "Icon name" },
+        "variant": {
+          "type": "string",
+          "enum": ["primary", "secondary", "danger", "ghost"],
+          "default": "secondary"
+        },
+        "confirm": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "message": { "type": "string" }
+          },
+          "description": "Confirmation dialog settings"
+        },
+        "condition": {
+          "$ref": "expression.schema.json",
+          "description": "Condition for showing this action"
+        }
+      },
+      "required": ["name", "function"],
+      "additionalProperties": false
+    },
+
+    "View": {
+      "type": "object",
+      "description": "UI View definition for frontend",
+      "properties": {
+        "_kind": { "const": "view" },
+        "description": { "type": "string" },
+        "entity": { "type": "string", "description": "Primary entity for this view" },
+        "type": {
+          "type": "string",
+          "enum": ["list", "detail", "form", "dashboard"],
+          "description": "View type"
+        },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ViewField" },
+          "description": "Fields to display"
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ViewAction" },
+          "description": "Available actions"
+        },
+        "filters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field": { "type": "string" },
+              "type": { "type": "string", "enum": ["text", "select", "date_range", "number_range"] },
+              "label": { "type": "string" },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": {},
+                    "label": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "required": ["field"]
+          },
+          "description": "Filter definitions for list views"
+        },
+        "pagination": {
+          "type": "object",
+          "properties": {
+            "defaultPageSize": { "type": "integer", "default": 20 },
+            "pageSizeOptions": { "type": "array", "items": { "type": "integer" } }
+          }
+        },
+        "defaultSort": {
+          "type": "object",
+          "properties": {
+            "field": { "type": "string" },
+            "direction": { "type": "string", "enum": ["asc", "desc"], "default": "asc" }
+          }
+        }
+      },
+      "required": ["entity", "type"],
+      "additionalProperties": false
+    },
+
+    "RouteGuard": {
+      "type": "object",
+      "description": "Route guard/middleware definition",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["auth", "role", "permission", "custom"],
+          "description": "Guard type"
+        },
+        "role": { "type": "string", "description": "Required role (for role guard)" },
+        "permission": { "type": "string", "description": "Required permission (for permission guard)" },
+        "condition": { "$ref": "expression.schema.json", "description": "Custom condition" },
+        "redirect": { "type": "string", "description": "Redirect path if guard fails" }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+
+    "Route": {
+      "type": "object",
+      "description": "Frontend route definition",
+      "properties": {
+        "_kind": { "const": "route" },
+        "description": { "type": "string" },
+        "view": { "type": "string", "description": "View to render" },
+        "title": { "type": "string", "description": "Page title" },
+        "guards": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RouteGuard" },
+          "description": "Route guards/middleware"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["string", "int", "uuid"] },
+              "required": { "type": "boolean", "default": true }
+            }
+          },
+          "description": "Route parameters (e.g., :id)"
+        },
+        "layout": { "type": "string", "description": "Layout component to use" },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Additional route metadata"
+        }
+      },
+      "required": ["view"],
+      "additionalProperties": false
     }
   },
 
@@ -1019,6 +1187,16 @@
       "type": "object",
       "description": "Audit trail configurations",
       "additionalProperties": { "$ref": "#/$defs/Audit" }
+    },
+    "views": {
+      "type": "object",
+      "description": "UI view definitions for frontend",
+      "additionalProperties": { "$ref": "#/$defs/View" }
+    },
+    "routes": {
+      "type": "object",
+      "description": "Frontend route definitions (path -> route)",
+      "additionalProperties": { "$ref": "#/$defs/Route" }
     }
   },
   "required": ["meta", "state"],
