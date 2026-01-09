@@ -428,6 +428,18 @@ class MeshValidator(
         unused_warnings = self._detect_unused_functions(spec)
         warnings.extend(unused_warnings)
 
+        # 22. Page validation (FE-006, FE-007, FE-008, FE-014)
+        page_errors = self._validate_pages(spec)
+        errors.extend(page_errors)
+
+        # 23. Component validation (FE-009, FE-010, FE-013)
+        component_errors = self._validate_components(spec)
+        errors.extend(component_errors)
+
+        # 24. Frontend scenario validation (FE-011)
+        fe_scenario_errors = self._validate_frontend_scenarios(spec)
+        errors.extend(fe_scenario_errors)
+
         return ValidationResult(
             valid=len(errors) == 0,
             errors=errors,
@@ -2077,3 +2089,172 @@ class MeshValidator(
             ))
 
         return warnings
+
+    def _validate_pages(self, spec: dict) -> list[ValidationError]:
+        """
+        FE-006, FE-007, FE-008, FE-014: Validate page definitions.
+
+        Validates:
+        - FE-006: Page.route references a valid route
+        - FE-007: Page.views[] references valid views
+        - FE-008: Page.dataFetching.queries/mutations references valid functions
+        - FE-014: Page.components[] references valid components
+
+        Returns StructuredError with codes FE-006, FE-007, FE-008, or FE-014.
+        """
+        errors = []
+        routes = set(spec.get("routes", {}).keys())
+        views = set(spec.get("views", {}).keys())
+        functions = set(spec.get("functions", {}).keys())
+        components = set(spec.get("components", {}).keys())
+        pages = spec.get("pages", {})
+
+        for page_name, page in pages.items():
+            # FE-006: Validate route reference
+            route_path = page.get("route", "")
+            if route_path and route_path not in routes:
+                errors.append(ValidationError(
+                    path=f"pages.{page_name}.route",
+                    message=f"Page '{page_name}' references unknown route '{route_path}'",
+                    code="FE-006",
+                    category="reference",
+                    expected=list(routes)[:10] if routes else [],
+                    actual=route_path
+                ))
+
+            # FE-007: Validate view references
+            for i, view_name in enumerate(page.get("views", [])):
+                if view_name and view_name not in views:
+                    errors.append(ValidationError(
+                        path=f"pages.{page_name}.views[{i}]",
+                        message=f"Page '{page_name}' references unknown view '{view_name}'",
+                        code="FE-007",
+                        category="reference",
+                        expected=list(views)[:10] if views else [],
+                        actual=view_name
+                    ))
+
+            # FE-008: Validate dataFetching function references
+            data_fetching = page.get("dataFetching", {})
+
+            for i, query in enumerate(data_fetching.get("queries", [])):
+                if query and query not in functions:
+                    errors.append(ValidationError(
+                        path=f"pages.{page_name}.dataFetching.queries[{i}]",
+                        message=f"Page '{page_name}' dataFetching.queries references unknown function '{query}'",
+                        code="FE-008",
+                        category="reference",
+                        expected=list(functions)[:10] if functions else [],
+                        actual=query
+                    ))
+
+            for i, mutation in enumerate(data_fetching.get("mutations", [])):
+                if mutation and mutation not in functions:
+                    errors.append(ValidationError(
+                        path=f"pages.{page_name}.dataFetching.mutations[{i}]",
+                        message=f"Page '{page_name}' dataFetching.mutations references unknown function '{mutation}'",
+                        code="FE-008",
+                        category="reference",
+                        expected=list(functions)[:10] if functions else [],
+                        actual=mutation
+                    ))
+
+            # FE-014: Validate component references
+            for i, comp_name in enumerate(page.get("components", [])):
+                if comp_name and comp_name not in components:
+                    errors.append(ValidationError(
+                        path=f"pages.{page_name}.components[{i}]",
+                        message=f"Page '{page_name}' references unknown component '{comp_name}'",
+                        code="FE-014",
+                        category="reference",
+                        expected=list(components)[:10] if components else [],
+                        actual=comp_name
+                    ))
+
+        return errors
+
+    def _validate_components(self, spec: dict) -> list[ValidationError]:
+        """
+        FE-009, FE-010, FE-013: Validate component definitions.
+
+        Validates:
+        - FE-009: Component.entity references a valid entity
+        - FE-010: Component.actions[] references valid functions
+        - FE-013: Component.fields[] references valid fields in the entity
+
+        Returns StructuredError with codes FE-009, FE-010, or FE-013.
+        """
+        errors = []
+        entities = set(spec.get("state", {}).keys())
+        functions = set(spec.get("functions", {}).keys())
+        components = spec.get("components", {})
+
+        for comp_name, comp in components.items():
+            # FE-009: Validate entity reference
+            entity_name = comp.get("entity", "")
+            if entity_name and entity_name not in entities:
+                errors.append(ValidationError(
+                    path=f"components.{comp_name}.entity",
+                    message=f"Component '{comp_name}' references unknown entity '{entity_name}'",
+                    code="FE-009",
+                    category="reference",
+                    expected=list(entities)[:10] if entities else [],
+                    actual=entity_name
+                ))
+
+            # FE-013: Validate field references (only if entity is valid)
+            if entity_name and entity_name in spec.get("state", {}):
+                entity_fields = set(spec["state"][entity_name].get("fields", {}).keys())
+
+                for i, field_name in enumerate(comp.get("fields", [])):
+                    if field_name and field_name not in entity_fields:
+                        errors.append(ValidationError(
+                            path=f"components.{comp_name}.fields[{i}]",
+                            message=f"Component '{comp_name}' references unknown field '{field_name}' in entity '{entity_name}'",
+                            code="FE-013",
+                            category="reference",
+                            expected=list(entity_fields)[:10] if entity_fields else [],
+                            actual=field_name
+                        ))
+
+            # FE-010: Validate action function references
+            for i, action_name in enumerate(comp.get("actions", [])):
+                if action_name and action_name not in functions:
+                    errors.append(ValidationError(
+                        path=f"components.{comp_name}.actions[{i}]",
+                        message=f"Component '{comp_name}' references unknown function '{action_name}'",
+                        code="FE-010",
+                        category="reference",
+                        expected=list(functions)[:10] if functions else [],
+                        actual=action_name
+                    ))
+
+        return errors
+
+    def _validate_frontend_scenarios(self, spec: dict) -> list[ValidationError]:
+        """
+        FE-011: Validate frontend scenario definitions.
+
+        Validates:
+        - FE-011: FrontendScenario.page references a valid page
+
+        Returns StructuredError with code FE-011.
+        """
+        errors = []
+        pages = set(spec.get("pages", {}).keys())
+        scenarios = spec.get("frontendScenarios", {})
+
+        for scenario_id, scenario in scenarios.items():
+            # FE-011: Validate page reference
+            page_name = scenario.get("page", "")
+            if page_name and page_name not in pages:
+                errors.append(ValidationError(
+                    path=f"frontendScenarios.{scenario_id}.page",
+                    message=f"Frontend scenario '{scenario_id}' references unknown page '{page_name}'",
+                    code="FE-011",
+                    category="reference",
+                    expected=list(pages)[:10] if pages else [],
+                    actual=page_name
+                ))
+
+        return errors

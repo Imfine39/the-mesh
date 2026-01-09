@@ -452,6 +452,347 @@ class TestUnusedFunctionWarning:
         assert "public_unused" in unused_names
 
 
+class TestPageValidation:
+    """Test FE-006, FE-007, FE-008, FE-014: Page validation"""
+
+    def setup_method(self):
+        self.validator = MeshValidator()
+
+    def test_valid_page(self):
+        """Test that valid page passes validation"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {
+                "invoice": {"fields": {"id": {"type": "string"}, "amount": {"type": "int"}}}
+            },
+            "functions": {
+                "list_invoices": {"input": {}},
+                "create_invoice": {"input": {"amount": {"type": "int"}}}
+            },
+            "views": {
+                "InvoiceList": {"entity": "invoice", "type": "list"},
+                "InvoiceForm": {"entity": "invoice", "type": "form"}
+            },
+            "routes": {
+                "/invoices": {"view": "InvoiceList"}
+            },
+            "components": {
+                "InvoiceStatusBadge": {"entity": "invoice", "fields": ["id"]}
+            },
+            "pages": {
+                "InvoicePage": {
+                    "route": "/invoices",
+                    "views": ["InvoiceList", "InvoiceForm"],
+                    "dataFetching": {
+                        "queries": ["list_invoices"],
+                        "mutations": ["create_invoice"]
+                    },
+                    "components": ["InvoiceStatusBadge"]
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe_errors = [e for e in result.errors if e.code and e.code.startswith("FE-00") or e.code and e.code.startswith("FE-01")]
+        assert len(fe_errors) == 0
+
+    def test_fe006_invalid_route_reference(self):
+        """Test FE-006: Page references unknown route"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "views": {"InvoiceList": {"entity": "invoice", "type": "list"}},
+            "routes": {"/invoices": {"view": "InvoiceList"}},
+            "pages": {
+                "CustomerPage": {
+                    "route": "/customers",  # Does not exist
+                    "views": ["InvoiceList"]
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe006_errors = [e for e in result.errors if e.code == "FE-006"]
+        assert len(fe006_errors) >= 1
+        assert "/customers" in fe006_errors[0].message
+
+    def test_fe007_invalid_view_reference(self):
+        """Test FE-007: Page references unknown view"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "views": {"InvoiceList": {"entity": "invoice", "type": "list"}},
+            "routes": {"/invoices": {"view": "InvoiceList"}},
+            "pages": {
+                "InvoicePage": {
+                    "route": "/invoices",
+                    "views": ["InvoiceList", "CustomerDetail"]  # CustomerDetail does not exist
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe007_errors = [e for e in result.errors if e.code == "FE-007"]
+        assert len(fe007_errors) >= 1
+        assert "CustomerDetail" in fe007_errors[0].message
+
+    def test_fe008_invalid_query_function(self):
+        """Test FE-008: Page dataFetching.queries references unknown function"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "functions": {"list_invoices": {"input": {}}},
+            "views": {"InvoiceList": {"entity": "invoice", "type": "list"}},
+            "routes": {"/invoices": {"view": "InvoiceList"}},
+            "pages": {
+                "InvoicePage": {
+                    "route": "/invoices",
+                    "views": ["InvoiceList"],
+                    "dataFetching": {
+                        "queries": ["list_invoices", "get_invoice_stats"]  # get_invoice_stats does not exist
+                    }
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe008_errors = [e for e in result.errors if e.code == "FE-008"]
+        assert len(fe008_errors) >= 1
+        assert "get_invoice_stats" in fe008_errors[0].message
+
+    def test_fe008_invalid_mutation_function(self):
+        """Test FE-008: Page dataFetching.mutations references unknown function"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "functions": {"create_invoice": {"input": {}}},
+            "views": {"InvoiceList": {"entity": "invoice", "type": "list"}},
+            "routes": {"/invoices": {"view": "InvoiceList"}},
+            "pages": {
+                "InvoicePage": {
+                    "route": "/invoices",
+                    "views": ["InvoiceList"],
+                    "dataFetching": {
+                        "mutations": ["create_invoice", "delete_invoice"]  # delete_invoice does not exist
+                    }
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe008_errors = [e for e in result.errors if e.code == "FE-008"]
+        assert len(fe008_errors) >= 1
+        assert "delete_invoice" in fe008_errors[0].message
+
+    def test_fe014_invalid_component_reference(self):
+        """Test FE-014: Page references unknown component"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "views": {"InvoiceList": {"entity": "invoice", "type": "list"}},
+            "routes": {"/invoices": {"view": "InvoiceList"}},
+            "components": {"InvoiceStatusBadge": {}},
+            "pages": {
+                "InvoicePage": {
+                    "route": "/invoices",
+                    "views": ["InvoiceList"],
+                    "components": ["InvoiceStatusBadge", "CustomerAvatar"]  # CustomerAvatar does not exist
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe014_errors = [e for e in result.errors if e.code == "FE-014"]
+        assert len(fe014_errors) >= 1
+        assert "CustomerAvatar" in fe014_errors[0].message
+
+
+class TestComponentValidation:
+    """Test FE-009, FE-010, FE-013: Component validation"""
+
+    def setup_method(self):
+        self.validator = MeshValidator()
+
+    def test_valid_component(self):
+        """Test that valid component passes validation"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {
+                "invoice": {
+                    "fields": {
+                        "id": {"type": "string"},
+                        "status": {"type": {"enum": ["open", "closed"]}}
+                    }
+                }
+            },
+            "functions": {
+                "update_status": {"input": {"status": {"type": "string"}}}
+            },
+            "components": {
+                "InvoiceStatusBadge": {
+                    "type": "display",
+                    "entity": "invoice",
+                    "fields": ["id", "status"],
+                    "actions": ["update_status"]
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe_errors = [e for e in result.errors if e.code and e.code in ["FE-009", "FE-010", "FE-013"]]
+        assert len(fe_errors) == 0
+
+    def test_fe009_invalid_entity_reference(self):
+        """Test FE-009: Component references unknown entity"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "components": {
+                "CustomerBadge": {
+                    "type": "display",
+                    "entity": "customer"  # Does not exist
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe009_errors = [e for e in result.errors if e.code == "FE-009"]
+        assert len(fe009_errors) >= 1
+        assert "customer" in fe009_errors[0].message
+
+    def test_fe010_invalid_action_reference(self):
+        """Test FE-010: Component action references unknown function"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "functions": {"update_invoice": {"input": {}}},
+            "components": {
+                "InvoiceCard": {
+                    "entity": "invoice",
+                    "actions": ["update_invoice", "delete_invoice"]  # delete_invoice does not exist
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe010_errors = [e for e in result.errors if e.code == "FE-010"]
+        assert len(fe010_errors) >= 1
+        assert "delete_invoice" in fe010_errors[0].message
+
+    def test_fe013_invalid_field_reference(self):
+        """Test FE-013: Component references unknown field in entity"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {
+                "invoice": {
+                    "fields": {
+                        "id": {"type": "string"},
+                        "amount": {"type": "int"}
+                    }
+                }
+            },
+            "components": {
+                "InvoiceStatusBadge": {
+                    "entity": "invoice",
+                    "fields": ["id", "status"]  # status does not exist in invoice
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe013_errors = [e for e in result.errors if e.code == "FE-013"]
+        assert len(fe013_errors) >= 1
+        assert "status" in fe013_errors[0].message
+
+    def test_component_without_entity_skips_field_validation(self):
+        """Test that component without entity skips field validation"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "components": {
+                "GenericButton": {
+                    "type": "input",
+                    # No entity specified
+                    "fields": ["any_field"]  # Should not cause error
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe013_errors = [e for e in result.errors if e.code == "FE-013"]
+        assert len(fe013_errors) == 0
+
+
+class TestFrontendScenarioValidation:
+    """Test FE-011: Frontend scenario validation"""
+
+    def setup_method(self):
+        self.validator = MeshValidator()
+
+    def test_valid_frontend_scenario(self):
+        """Test that valid frontend scenario passes validation"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "views": {"InvoiceList": {"entity": "invoice", "type": "list"}},
+            "routes": {"/invoices": {"view": "InvoiceList"}},
+            "pages": {
+                "InvoicePage": {
+                    "route": "/invoices",
+                    "views": ["InvoiceList"]
+                }
+            },
+            "frontendScenarios": {
+                "FE-AT-001": {
+                    "title": "User can view invoice list",
+                    "page": "InvoicePage",
+                    "steps": [
+                        {"action": "navigate", "to": "/invoices"},
+                        {"action": "assert", "assertion": {"type": "visible", "expected": "InvoiceList"}}
+                    ]
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe011_errors = [e for e in result.errors if e.code == "FE-011"]
+        assert len(fe011_errors) == 0
+
+    def test_fe011_invalid_page_reference(self):
+        """Test FE-011: Frontend scenario references unknown page"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            "views": {"InvoiceList": {"entity": "invoice", "type": "list"}},
+            "routes": {"/invoices": {"view": "InvoiceList"}},
+            "pages": {
+                "InvoicePage": {
+                    "route": "/invoices",
+                    "views": ["InvoiceList"]
+                }
+            },
+            "frontendScenarios": {
+                "FE-AT-001": {
+                    "title": "User can view customer list",
+                    "page": "CustomerPage",  # Does not exist
+                    "steps": [
+                        {"action": "navigate", "to": "/customers"}
+                    ]
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe011_errors = [e for e in result.errors if e.code == "FE-011"]
+        assert len(fe011_errors) >= 1
+        assert "CustomerPage" in fe011_errors[0].message
+
+    def test_empty_pages_with_frontend_scenario(self):
+        """Test FE-011: Frontend scenario with no pages defined"""
+        spec = {
+            "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
+            "state": {"invoice": {"fields": {"id": {"type": "string"}}}},
+            # No pages defined
+            "frontendScenarios": {
+                "FE-AT-001": {
+                    "title": "Test scenario",
+                    "page": "SomePage",
+                    "steps": [{"action": "navigate", "to": "/"}]
+                }
+            }
+        }
+        result = self.validator.validate(spec)
+        fe011_errors = [e for e in result.errors if e.code == "FE-011"]
+        assert len(fe011_errors) >= 1
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

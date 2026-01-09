@@ -1084,6 +1084,189 @@
       },
       "required": ["view"],
       "additionalProperties": false
+    },
+
+    "Page": {
+      "type": "object",
+      "description": "Frontend page composition - combines views with data fetching strategy",
+      "properties": {
+        "_kind": { "const": "page" },
+        "description": { "type": "string" },
+        "route": { "type": "string", "description": "Route path this page implements (must match a key in routes)" },
+        "views": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Views composed in this page"
+        },
+        "layout": {
+          "type": "string",
+          "description": "Layout component/template to use"
+        },
+        "dataFetching": {
+          "type": "object",
+          "properties": {
+            "queries": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Functions to call for data loading (read operations)"
+            },
+            "mutations": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Functions available for mutations (write operations)"
+            },
+            "prefetch": { "type": "boolean", "default": false, "description": "Prefetch data on navigation" },
+            "ssr": { "type": "boolean", "default": true, "description": "Enable server-side rendering" }
+          },
+          "additionalProperties": false
+        },
+        "components": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Additional components used in this page"
+        }
+      },
+      "required": ["route", "views"],
+      "additionalProperties": false
+    },
+
+    "Component": {
+      "type": "object",
+      "description": "Reusable UI component definition",
+      "properties": {
+        "_kind": { "const": "component" },
+        "description": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["display", "input", "form", "container", "layout"],
+          "description": "Component category"
+        },
+        "entity": {
+          "type": "string",
+          "description": "Primary entity this component displays/edits"
+        },
+        "fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Entity fields this component uses"
+        },
+        "props": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Field" },
+          "description": "Additional props beyond entity fields"
+        },
+        "variants": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": { "type": "string" },
+              "styles": { "type": "object" }
+            },
+            "additionalProperties": true
+          },
+          "description": "Component variants (e.g., status badge colors)"
+        },
+        "actions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Functions this component can trigger"
+        },
+        "slots": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Named slots for component composition"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "FrontendStep": {
+      "type": "object",
+      "description": "Single step in an E2E test scenario",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["navigate", "click", "fill", "select", "hover", "wait", "submit", "assert", "screenshot"],
+          "description": "Action type to perform"
+        },
+        "target": {
+          "type": "string",
+          "description": "CSS selector, data-testid, or semantic target (e.g., 'button.submit', '[data-testid=invoice-row-0]')"
+        },
+        "value": {
+          "description": "Value for fill/select actions"
+        },
+        "to": {
+          "type": "string",
+          "description": "URL path for navigate action"
+        },
+        "assertion": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["visible", "hidden", "text", "value", "count", "url", "toast", "enabled", "disabled"],
+              "description": "Assertion type"
+            },
+            "expected": {
+              "description": "Expected value for the assertion"
+            }
+          },
+          "required": ["type"]
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Step timeout in milliseconds"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of this step"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+
+    "FrontendScenario": {
+      "type": "object",
+      "description": "E2E test scenario for frontend",
+      "properties": {
+        "_kind": { "const": "frontend_scenario" },
+        "title": { "type": "string", "description": "Scenario title" },
+        "description": { "type": "string" },
+        "page": { "type": "string", "description": "Starting page for this scenario" },
+        "verifies": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Requirement IDs verified by this scenario"
+        },
+        "given": {
+          "type": "object",
+          "description": "Initial state/fixtures for the test",
+          "properties": {
+            "user": {
+              "type": "object",
+              "properties": {
+                "role": { "type": "string", "description": "User role for this scenario" },
+                "authenticated": { "type": "boolean", "default": true }
+              },
+              "additionalProperties": false
+            },
+            "fixtures": { "$ref": "#/$defs/ScenarioData" }
+          },
+          "additionalProperties": false
+        },
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FrontendStep" },
+          "minItems": 1,
+          "description": "Test steps to execute"
+        }
+      },
+      "required": ["title", "page", "steps"],
+      "additionalProperties": false
     }
   },
 
@@ -1197,6 +1380,21 @@
       "type": "object",
       "description": "Frontend route definitions (path -> route)",
       "additionalProperties": { "$ref": "#/$defs/Route" }
+    },
+    "pages": {
+      "type": "object",
+      "description": "Frontend page compositions - combine views with data fetching",
+      "additionalProperties": { "$ref": "#/$defs/Page" }
+    },
+    "components": {
+      "type": "object",
+      "description": "Reusable UI component definitions",
+      "additionalProperties": { "$ref": "#/$defs/Component" }
+    },
+    "frontendScenarios": {
+      "type": "object",
+      "description": "E2E test scenarios for frontend",
+      "additionalProperties": { "$ref": "#/$defs/FrontendScenario" }
     }
   },
   "required": ["meta", "state"],
