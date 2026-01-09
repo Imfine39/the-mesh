@@ -1,0 +1,608 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://the-mesh.dev/schemas/mesh/expression.schema.json",
+  "title": "Mesh Expression Schema (Tagged Union)",
+  "description": "Typed Relational IR - Expression AST with discriminator tags",
+
+  "$defs": {
+    "Expression": {
+      "description": "Any expression node - discriminated by 'type' field",
+      "oneOf": [
+        { "$ref": "#/$defs/Literal" },
+        { "$ref": "#/$defs/FieldRef" },
+        { "$ref": "#/$defs/InputRef" },
+        { "$ref": "#/$defs/SelfRef" },
+        { "$ref": "#/$defs/BinaryOp" },
+        { "$ref": "#/$defs/UnaryOp" },
+        { "$ref": "#/$defs/Aggregation" },
+        { "$ref": "#/$defs/FunctionCall" },
+        { "$ref": "#/$defs/IfThenElse" },
+        { "$ref": "#/$defs/Case" },
+        { "$ref": "#/$defs/DateOp" },
+        { "$ref": "#/$defs/ListOp" },
+        { "$ref": "#/$defs/TemporalOp" },
+        { "$ref": "#/$defs/WindowOp" },
+        { "$ref": "#/$defs/TreeOp" },
+        { "$ref": "#/$defs/TransitiveOp" },
+        { "$ref": "#/$defs/StateOp" },
+        { "$ref": "#/$defs/PrincipalOp" }
+      ],
+      "discriminator": {
+        "propertyName": "type"
+      }
+    },
+
+    "Literal": {
+      "description": "Literal value",
+      "type": "object",
+      "properties": {
+        "type": { "const": "literal" },
+        "value": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "number" },
+            { "type": "string" },
+            { "type": "boolean" },
+            { "type": "null" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        }
+      },
+      "required": ["type", "value"],
+      "additionalProperties": false
+    },
+
+    "FieldRef": {
+      "description": "Reference to an entity field: entity.field or entity.field.nested",
+      "type": "object",
+      "properties": {
+        "type": { "const": "ref" },
+        "path": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)+$",
+          "description": "Dot-separated path: 'invoice.amount' or 'invoice.customer.name'"
+        }
+      },
+      "required": ["type", "path"],
+      "additionalProperties": false
+    },
+
+    "InputRef": {
+      "description": "Reference to function input parameter",
+      "type": "object",
+      "properties": {
+        "type": { "const": "input" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "description": "Input parameter name"
+        }
+      },
+      "required": ["type", "name"],
+      "additionalProperties": false
+    },
+
+    "SelfRef": {
+      "description": "Reference to self (current entity in derived formula)",
+      "type": "object",
+      "properties": {
+        "type": { "const": "self" },
+        "field": {
+          "type": "string",
+          "description": "Field name on self (empty string for self entity)"
+        }
+      },
+      "required": ["type", "field"],
+      "additionalProperties": false
+    },
+
+    "BinaryOp": {
+      "description": "Binary operation",
+      "type": "object",
+      "properties": {
+        "type": { "const": "binary" },
+        "op": {
+          "type": "string",
+          "enum": [
+            "add", "sub", "mul", "div", "mod",
+            "eq", "ne", "lt", "le", "gt", "ge",
+            "and", "or",
+            "in", "not_in",
+            "like", "not_like"
+          ]
+        },
+        "left": { "$ref": "#/$defs/Expression" },
+        "right": { "$ref": "#/$defs/Expression" }
+      },
+      "required": ["type", "op", "left", "right"],
+      "additionalProperties": false
+    },
+
+    "UnaryOp": {
+      "description": "Unary operation",
+      "type": "object",
+      "properties": {
+        "type": { "const": "unary" },
+        "op": {
+          "type": "string",
+          "enum": ["not", "neg", "is_null", "is_not_null"]
+        },
+        "expr": { "$ref": "#/$defs/Expression" }
+      },
+      "required": ["type", "op", "expr"],
+      "additionalProperties": false
+    },
+
+    "Aggregation": {
+      "description": "Aggregation over a collection",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "count/exists/not_exists: expr is optional",
+          "properties": {
+            "type": { "const": "agg" },
+            "op": { "enum": ["count", "exists", "not_exists"] },
+            "from": { "type": "string", "description": "Source entity name" },
+            "as": { "type": "string", "default": "item", "description": "Alias for iteration variable" },
+            "expr": { "$ref": "#/$defs/Expression", "description": "Optional expression (count distinct)" },
+            "where": { "$ref": "#/$defs/Expression", "description": "Filter condition" }
+          },
+          "required": ["type", "op", "from"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "sum/avg/min/max: expr is required",
+          "properties": {
+            "type": { "const": "agg" },
+            "op": { "enum": ["sum", "avg", "min", "max"] },
+            "from": { "type": "string", "description": "Source entity name" },
+            "as": { "type": "string", "default": "item", "description": "Alias for iteration variable" },
+            "expr": { "$ref": "#/$defs/Expression", "description": "Expression to aggregate (required)" },
+            "where": { "$ref": "#/$defs/Expression", "description": "Filter condition" }
+          },
+          "required": ["type", "op", "from", "expr"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "all/any: expr is required (predicate)",
+          "properties": {
+            "type": { "const": "agg" },
+            "op": { "enum": ["all", "any"] },
+            "from": { "type": "string", "description": "Source entity name" },
+            "as": { "type": "string", "default": "item", "description": "Alias for iteration variable" },
+            "expr": { "$ref": "#/$defs/Expression", "description": "Predicate expression (required)" },
+            "where": { "$ref": "#/$defs/Expression", "description": "Filter condition" }
+          },
+          "required": ["type", "op", "from", "expr"],
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "FunctionCall": {
+      "description": "Call to a derived function",
+      "type": "object",
+      "properties": {
+        "type": { "const": "call" },
+        "name": {
+          "type": "string",
+          "description": "Derived function name"
+        },
+        "args": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Expression" },
+          "description": "Arguments to the function"
+        }
+      },
+      "required": ["type", "name"],
+      "additionalProperties": false
+    },
+
+    "IfThenElse": {
+      "description": "Conditional if-then-else expression",
+      "type": "object",
+      "properties": {
+        "type": { "const": "if" },
+        "cond": { "$ref": "#/$defs/Expression" },
+        "then": { "$ref": "#/$defs/Expression" },
+        "else": { "$ref": "#/$defs/Expression" }
+      },
+      "required": ["type", "cond", "then", "else"],
+      "additionalProperties": false
+    },
+
+    "Case": {
+      "description": "Case expression with multiple branches (else required for explicit default)",
+      "type": "object",
+      "properties": {
+        "type": { "const": "case" },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "when": { "$ref": "#/$defs/Expression" },
+              "then": { "$ref": "#/$defs/Expression" }
+            },
+            "required": ["when", "then"],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "else": {
+          "$ref": "#/$defs/Expression",
+          "description": "Default value when no branch matches (required)"
+        }
+      },
+      "required": ["type", "branches", "else"],
+      "additionalProperties": false
+    },
+
+    "DateOp": {
+      "description": "Date/time operations",
+      "type": "object",
+      "properties": {
+        "type": { "const": "date" },
+        "op": {
+          "type": "string",
+          "enum": ["diff", "add", "sub", "now", "today", "overlaps", "truncate"]
+        },
+        "args": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Expression" }
+        },
+        "unit": {
+          "type": "string",
+          "enum": ["days", "hours", "minutes", "seconds", "months", "years"]
+        }
+      },
+      "required": ["type", "op"],
+      "additionalProperties": false
+    },
+
+    "ListOp": {
+      "description": "List/array operations",
+      "type": "object",
+      "properties": {
+        "type": { "const": "list" },
+        "op": {
+          "type": "string",
+          "enum": ["contains", "length", "first", "last", "at", "slice"]
+        },
+        "list": { "$ref": "#/$defs/Expression" },
+        "args": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Expression" }
+        }
+      },
+      "required": ["type", "op", "list"],
+      "additionalProperties": false
+    },
+
+    "TemporalOp": {
+      "description": "Temporal operations (borrowed from Alloy 6)",
+      "type": "object",
+      "properties": {
+        "type": { "const": "temporal" },
+        "op": {
+          "type": "string",
+          "enum": [
+            "at",
+            "since",
+            "until",
+            "before",
+            "after",
+            "always",
+            "eventually",
+            "historically",
+            "once",
+            "previous",
+            "next"
+          ],
+          "description": "Temporal operator"
+        },
+        "entity": {
+          "type": "string",
+          "description": "Entity to query temporally"
+        },
+        "field": {
+          "type": "string",
+          "description": "Field to query"
+        },
+        "time": {
+          "$ref": "#/$defs/Expression",
+          "description": "Time point or interval expression"
+        },
+        "condition": {
+          "$ref": "#/$defs/Expression",
+          "description": "Temporal condition (for LTL operators)"
+        }
+      },
+      "required": ["type", "op"],
+      "additionalProperties": false
+    },
+
+    "WindowOp": {
+      "description": "Window functions (borrowed from SQL)",
+      "$defs": {
+        "WindowBase": {
+          "type": "object",
+          "properties": {
+            "type": { "const": "window" },
+            "from": { "type": "string", "description": "Source entity" },
+            "partitionBy": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Expression" },
+              "description": "Partition columns"
+            },
+            "orderBy": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "expr": { "$ref": "#/$defs/Expression" },
+                  "direction": { "type": "string", "enum": ["asc", "desc"], "default": "asc" }
+                },
+                "required": ["expr"]
+              },
+              "description": "Order by columns"
+            },
+            "frame": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "enum": ["rows", "range"], "default": "rows" },
+                "start": { "type": "string", "enum": ["unbounded_preceding", "current_row", "preceding", "following"], "default": "unbounded_preceding" },
+                "startOffset": { "type": "integer" },
+                "end": { "type": "string", "enum": ["unbounded_following", "current_row", "preceding", "following"], "default": "current_row" },
+                "endOffset": { "type": "integer" }
+              },
+              "description": "Window frame specification"
+            }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "row_number/rank/dense_rank: expr not needed",
+          "properties": {
+            "type": { "const": "window" },
+            "op": { "enum": ["row_number", "rank", "dense_rank"] },
+            "from": { "type": "string", "description": "Source entity" },
+            "partitionBy": { "type": "array", "items": { "$ref": "#/$defs/Expression" } },
+            "orderBy": { "type": "array", "items": { "type": "object", "properties": { "expr": { "$ref": "#/$defs/Expression" }, "direction": { "type": "string", "enum": ["asc", "desc"], "default": "asc" } }, "required": ["expr"] } },
+            "frame": { "type": "object" }
+          },
+          "required": ["type", "op", "from"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "sum/avg/min/max/count: expr required",
+          "properties": {
+            "type": { "const": "window" },
+            "op": { "enum": ["sum", "avg", "min", "max", "count"] },
+            "from": { "type": "string", "description": "Source entity" },
+            "expr": { "$ref": "#/$defs/Expression", "description": "Expression to aggregate (required)" },
+            "partitionBy": { "type": "array", "items": { "$ref": "#/$defs/Expression" } },
+            "orderBy": { "type": "array", "items": { "type": "object", "properties": { "expr": { "$ref": "#/$defs/Expression" }, "direction": { "type": "string", "enum": ["asc", "desc"], "default": "asc" } }, "required": ["expr"] } },
+            "frame": { "type": "object" }
+          },
+          "required": ["type", "op", "from", "expr"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "first_value/last_value/nth_value: expr required",
+          "properties": {
+            "type": { "const": "window" },
+            "op": { "enum": ["first_value", "last_value", "nth_value"] },
+            "from": { "type": "string", "description": "Source entity" },
+            "expr": { "$ref": "#/$defs/Expression", "description": "Expression to evaluate (required)" },
+            "args": { "type": "array", "items": { "$ref": "#/$defs/Expression" }, "description": "nth position for nth_value" },
+            "partitionBy": { "type": "array", "items": { "$ref": "#/$defs/Expression" } },
+            "orderBy": { "type": "array", "items": { "type": "object", "properties": { "expr": { "$ref": "#/$defs/Expression" }, "direction": { "type": "string", "enum": ["asc", "desc"], "default": "asc" } }, "required": ["expr"] } },
+            "frame": { "type": "object" }
+          },
+          "required": ["type", "op", "from", "expr"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "lag/lead: expr required, args for offset",
+          "properties": {
+            "type": { "const": "window" },
+            "op": { "enum": ["lag", "lead"] },
+            "from": { "type": "string", "description": "Source entity" },
+            "expr": { "$ref": "#/$defs/Expression", "description": "Expression to evaluate (required)" },
+            "args": { "type": "array", "items": { "$ref": "#/$defs/Expression" }, "description": "[offset, default_value]" },
+            "partitionBy": { "type": "array", "items": { "$ref": "#/$defs/Expression" } },
+            "orderBy": { "type": "array", "items": { "type": "object", "properties": { "expr": { "$ref": "#/$defs/Expression" }, "direction": { "type": "string", "enum": ["asc", "desc"], "default": "asc" } }, "required": ["expr"] } }
+          },
+          "required": ["type", "op", "from", "expr"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "ntile: args required for bucket count",
+          "properties": {
+            "type": { "const": "window" },
+            "op": { "const": "ntile" },
+            "from": { "type": "string", "description": "Source entity" },
+            "args": { "type": "array", "items": { "$ref": "#/$defs/Expression" }, "description": "[bucket_count]", "minItems": 1 },
+            "partitionBy": { "type": "array", "items": { "$ref": "#/$defs/Expression" } },
+            "orderBy": { "type": "array", "items": { "type": "object", "properties": { "expr": { "$ref": "#/$defs/Expression" }, "direction": { "type": "string", "enum": ["asc", "desc"], "default": "asc" } }, "required": ["expr"] } }
+          },
+          "required": ["type", "op", "from", "args"],
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "TreeOp": {
+      "description": "Tree/hierarchical operations (borrowed from SQL WITH RECURSIVE)",
+      "type": "object",
+      "properties": {
+        "type": { "const": "tree" },
+        "op": {
+          "type": "string",
+          "enum": [
+            "ancestors",
+            "descendants",
+            "parent",
+            "children",
+            "siblings",
+            "root",
+            "leaves",
+            "depth",
+            "path",
+            "subtree"
+          ]
+        },
+        "entity": {
+          "type": "string",
+          "description": "Entity with tree structure"
+        },
+        "node": {
+          "$ref": "#/$defs/Expression",
+          "description": "Starting node expression"
+        },
+        "parentField": {
+          "type": "string",
+          "description": "Field referencing parent (for self-referential trees)"
+        },
+        "maxDepth": {
+          "type": "integer",
+          "description": "Maximum traversal depth"
+        },
+        "includeNode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include the starting node in results"
+        }
+      },
+      "required": ["type", "op", "entity"],
+      "additionalProperties": false
+    },
+
+    "TransitiveOp": {
+      "description": "Transitive closure operations (borrowed from Alloy)",
+      "type": "object",
+      "properties": {
+        "type": { "const": "transitive" },
+        "op": {
+          "type": "string",
+          "enum": [
+            "closure",
+            "reflexive_closure",
+            "reachable",
+            "connected",
+            "path_exists"
+          ]
+        },
+        "relation": {
+          "type": "string",
+          "description": "Relation name to traverse"
+        },
+        "from": {
+          "$ref": "#/$defs/Expression",
+          "description": "Starting point(s)"
+        },
+        "to": {
+          "$ref": "#/$defs/Expression",
+          "description": "Target point(s) for path_exists"
+        },
+        "maxHops": {
+          "type": "integer",
+          "description": "Maximum number of hops"
+        }
+      },
+      "required": ["type", "op", "relation"],
+      "additionalProperties": false
+    },
+
+    "StateOp": {
+      "description": "State machine query operations (borrowed from XState)",
+      "type": "object",
+      "properties": {
+        "type": { "const": "state" },
+        "op": {
+          "type": "string",
+          "enum": [
+            "current",
+            "is_in",
+            "can_transition",
+            "history",
+            "time_in_state",
+            "previous_state",
+            "available_transitions"
+          ]
+        },
+        "machine": {
+          "type": "string",
+          "description": "State machine reference"
+        },
+        "entity": {
+          "$ref": "#/$defs/Expression",
+          "description": "Entity instance to check"
+        },
+        "state": {
+          "type": "string",
+          "description": "State to check (for is_in)"
+        },
+        "event": {
+          "type": "string",
+          "description": "Event to check (for can_transition)"
+        }
+      },
+      "required": ["type", "op", "machine"],
+      "additionalProperties": false
+    },
+
+    "PrincipalOp": {
+      "description": "Principal/authorization context operations (borrowed from ZenStack/Cedar)",
+      "type": "object",
+      "properties": {
+        "type": { "const": "principal" },
+        "op": {
+          "type": "string",
+          "enum": [
+            "current_user",
+            "current_tenant",
+            "has_role",
+            "has_permission",
+            "in_group",
+            "is_owner",
+            "attribute"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "description": "Role to check (for has_role)"
+        },
+        "permission": {
+          "type": "string",
+          "description": "Permission to check (for has_permission)"
+        },
+        "resource": {
+          "$ref": "#/$defs/Expression",
+          "description": "Resource to check against"
+        },
+        "attribute": {
+          "type": "string",
+          "description": "Principal attribute name (for attribute op)"
+        },
+        "group": {
+          "type": "string",
+          "description": "Group to check (for in_group)"
+        }
+      },
+      "required": ["type", "op"],
+      "additionalProperties": false
+    }
+  },
+
+  "$ref": "#/$defs/Expression"
+}

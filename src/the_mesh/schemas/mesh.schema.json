@@ -1,0 +1,1026 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://the-mesh.dev/schemas/mesh/mesh.schema.json",
+  "title": "Mesh Schema Definition",
+  "description": "Typed Relational IR - Schema for entities, functions, and specifications",
+
+  "$defs": {
+    "FieldType": {
+      "description": "Field type definition",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["string", "int", "float", "bool", "datetime", "text"]
+        },
+        { "$ref": "#/$defs/EnumType" },
+        { "$ref": "#/$defs/ListType" },
+        { "$ref": "#/$defs/RefType" }
+      ]
+    },
+
+    "EnumType": {
+      "type": "object",
+      "properties": {
+        "enum": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": ["enum"],
+      "additionalProperties": false
+    },
+
+    "ListType": {
+      "type": "object",
+      "properties": {
+        "list": { "$ref": "#/$defs/FieldType" }
+      },
+      "required": ["list"],
+      "additionalProperties": false
+    },
+
+    "RefType": {
+      "description": "Foreign key reference to another entity",
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string",
+          "description": "Target entity name"
+        },
+        "field": {
+          "type": "string",
+          "default": "id",
+          "description": "Target field (default: id)"
+        },
+        "on_delete": {
+          "type": "string",
+          "enum": ["cascade", "restrict", "set_null", "no_action"],
+          "default": "restrict"
+        }
+      },
+      "required": ["ref"],
+      "additionalProperties": false
+    },
+
+    "Field": {
+      "type": "object",
+      "properties": {
+        "type": { "$ref": "#/$defs/FieldType" },
+        "required": { "type": "boolean", "default": true },
+        "unique": { "type": "boolean", "default": false },
+        "default": {},
+        "description": { "type": "string" }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+
+    "Entity": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "fields": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Field" }
+        },
+        "indexes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Index" }
+        }
+      },
+      "required": ["fields"],
+      "additionalProperties": false
+    },
+
+    "Index": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "unique": { "type": "boolean", "default": false }
+      },
+      "required": ["fields"],
+      "additionalProperties": false
+    },
+
+    "DerivedFormula": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "entity": {
+          "type": "string",
+          "description": "Entity this formula applies to"
+        },
+        "formula": {
+          "$ref": "expression.schema.json",
+          "description": "The formula expression"
+        },
+        "returns": {
+          "$ref": "#/$defs/FieldType",
+          "description": "Return type of the formula (required)"
+        }
+      },
+      "required": ["entity", "formula", "returns"],
+      "additionalProperties": false
+    },
+
+    "Condition": {
+      "type": "object",
+      "properties": {
+        "expr": { "$ref": "expression.schema.json" },
+        "entity": {
+          "type": "string",
+          "description": "Entity context for the condition"
+        },
+        "reason": { "type": "string" }
+      },
+      "required": ["expr"],
+      "additionalProperties": false
+    },
+
+    "ErrorDef": {
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "when": { "$ref": "expression.schema.json" },
+        "reason": { "type": "string" },
+        "http_status": {
+          "type": "integer",
+          "default": 409
+        }
+      },
+      "required": ["code", "when"],
+      "additionalProperties": false
+    },
+
+    "Action": {
+      "oneOf": [
+        { "$ref": "#/$defs/CreateAction" },
+        { "$ref": "#/$defs/UpdateAction" },
+        { "$ref": "#/$defs/DeleteAction" }
+      ]
+    },
+
+    "CreateAction": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "string", "description": "Entity to create" },
+        "with": {
+          "type": "object",
+          "additionalProperties": { "$ref": "expression.schema.json" }
+        }
+      },
+      "required": ["create", "with"],
+      "additionalProperties": false
+    },
+
+    "UpdateAction": {
+      "type": "object",
+      "properties": {
+        "update": { "type": "string", "description": "Entity to update" },
+        "target": {
+          "$ref": "expression.schema.json",
+          "description": "Expression to identify target entity (required)"
+        },
+        "set": {
+          "type": "object",
+          "additionalProperties": { "$ref": "expression.schema.json" }
+        }
+      },
+      "required": ["update", "target", "set"],
+      "additionalProperties": false
+    },
+
+    "DeleteAction": {
+      "type": "object",
+      "properties": {
+        "delete": { "type": "string", "description": "Entity to delete" },
+        "where": { "$ref": "expression.schema.json" }
+      },
+      "required": ["delete", "where"],
+      "additionalProperties": false
+    },
+
+    "PostAction": {
+      "type": "object",
+      "properties": {
+        "action": { "$ref": "#/$defs/Action" },
+        "condition": {
+          "$ref": "expression.schema.json",
+          "description": "Optional condition for this action"
+        },
+        "reason": { "type": "string" }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+
+    "Function": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "implements": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Requirement IDs this function implements"
+        },
+        "input": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Field" }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Field" }
+        },
+        "pre": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Condition" }
+        },
+        "error": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ErrorDef" }
+        },
+        "post": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PostAction" }
+        },
+        "emits": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Events emitted by this function"
+        }
+      },
+      "required": ["input"],
+      "additionalProperties": false
+    },
+
+    "ScenarioData": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "object" },
+          { "type": "array", "items": { "type": "object" } }
+        ]
+      }
+    },
+
+    "Scenario": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "verifies": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Condition IDs this scenario verifies"
+        },
+        "given": { "$ref": "#/$defs/ScenarioData" },
+        "when": {
+          "type": "object",
+          "properties": {
+            "call": { "type": "string" },
+            "input": { "type": "object" }
+          },
+          "required": ["call", "input"]
+        },
+        "then": {
+          "type": "object",
+          "properties": {
+            "success": { "type": "boolean" },
+            "error": { "type": "string" },
+            "assert": {
+              "type": "array",
+              "items": { "$ref": "expression.schema.json" }
+            }
+          }
+        }
+      },
+      "required": ["title", "given", "when", "then"],
+      "additionalProperties": false
+    },
+
+    "Invariant": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "entity": { "type": "string" },
+        "expr": { "$ref": "expression.schema.json" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "entity", "expr"],
+      "additionalProperties": false
+    },
+
+    "Requirement": {
+      "type": "object",
+      "properties": {
+        "who": { "type": "string" },
+        "why": { "type": "string" },
+        "what": { "type": "string" },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "description": { "type": "string" },
+              "acceptance": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["id", "description"]
+          }
+        }
+      },
+      "required": ["who", "why", "what"],
+      "additionalProperties": false
+    },
+
+    "StateMachine": {
+      "type": "object",
+      "description": "State machine definition (borrowed from XState)",
+      "properties": {
+        "_kind": { "const": "state_machine" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "XState" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "entity": { "type": "string", "description": "Target entity" },
+        "field": { "type": "string", "description": "Status field name" },
+        "initial": { "type": "string", "description": "Initial state" },
+        "states": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/State" }
+        },
+        "transitions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Transition" }
+        }
+      },
+      "required": ["entity", "field", "initial", "states", "transitions"],
+      "additionalProperties": false
+    },
+
+    "State": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["atomic", "compound", "parallel", "final"],
+          "default": "atomic"
+        },
+        "description": { "type": "string" },
+        "initial": { "type": "string" },
+        "final": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this is a final state (shorthand for type: final)"
+        },
+        "states": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/State" }
+        },
+        "regions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "initial": { "type": "string" },
+              "states": { "type": "object", "additionalProperties": { "$ref": "#/$defs/State" } }
+            }
+          }
+        },
+        "onEntry": { "type": "array", "items": { "type": "string" } },
+        "onExit": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+
+    "Transition": {
+      "type": "object",
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "event": { "type": "string", "description": "Event name that triggers this transition" },
+        "trigger_function": { "type": "string", "description": "Function that triggers this transition" },
+        "guard": { "$ref": "expression.schema.json", "description": "Condition for transition" },
+        "actions": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["from", "to"],
+      "additionalProperties": false
+    },
+
+    "Event": {
+      "type": "object",
+      "description": "Domain event definition (borrowed from Event Sourcing/GraphQL)",
+      "properties": {
+        "_kind": { "const": "event" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "Event Sourcing" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Field" }
+        },
+        "emittedBy": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Functions that emit this event"
+        },
+        "triggeredBy": {
+          "type": "object",
+          "properties": {
+            "entity": { "type": "string" },
+            "on": { "enum": ["create", "update", "delete"] },
+            "when": { "$ref": "expression.schema.json" }
+          }
+        }
+      },
+      "required": ["payload"],
+      "additionalProperties": false
+    },
+
+    "Subscription": {
+      "type": "object",
+      "description": "Event subscription (borrowed from GraphQL Subscriptions)",
+      "properties": {
+        "_kind": { "const": "subscription" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "GraphQL" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "event": { "type": "string", "description": "Event to subscribe to" },
+        "handler": { "type": "string", "description": "Function to handle the event" },
+        "filter": { "$ref": "expression.schema.json", "description": "Optional filter condition" },
+        "deadLetter": {
+          "type": "object",
+          "properties": {
+            "queue": { "type": "string" },
+            "maxRetries": { "type": "integer", "default": 3 }
+          }
+        }
+      },
+      "required": ["event", "handler"],
+      "additionalProperties": false
+    },
+
+    "Role": {
+      "type": "object",
+      "description": "Role definition (borrowed from ZenStack)",
+      "properties": {
+        "_kind": { "const": "role" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "ZenStack" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "inherits": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Roles this role inherits from"
+        },
+        "permissions": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Simple permission names"
+            },
+            {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Permission" },
+              "description": "Detailed permission objects"
+            }
+          ]
+        },
+        "entityPermissions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "entity": { "type": "string" },
+              "operations": {
+                "type": "array",
+                "items": { "enum": ["create", "read", "update", "delete", "list", "*"] }
+              },
+              "condition": { "$ref": "expression.schema.json" }
+            },
+            "required": ["entity", "operations"]
+          },
+          "description": "Entity-level permission grants"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "Permission": {
+      "type": "object",
+      "properties": {
+        "resource": { "type": "string", "description": "Entity or resource name" },
+        "actions": {
+          "type": "array",
+          "items": { "enum": ["create", "read", "update", "delete", "list", "*"] }
+        },
+        "condition": { "$ref": "expression.schema.json", "description": "Row-level condition" }
+      },
+      "required": ["resource", "actions"],
+      "additionalProperties": false
+    },
+
+    "Saga": {
+      "type": "object",
+      "description": "Saga pattern for distributed transactions (borrowed from Temporal)",
+      "properties": {
+        "_kind": { "const": "saga" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "Temporal" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SagaStep" }
+        },
+        "onFailure": {
+          "enum": ["compensate_all", "compensate_completed", "abort"],
+          "default": "compensate_all"
+        },
+        "timeout": { "$ref": "#/$defs/Duration" }
+      },
+      "required": ["steps"],
+      "additionalProperties": false
+    },
+
+    "SagaStep": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "forward": { "type": "string", "description": "Function to execute" },
+        "compensate": { "type": "string", "description": "Compensation function" },
+        "timeout": { "$ref": "#/$defs/Duration" },
+        "retry": { "$ref": "#/$defs/RetryPolicy" }
+      },
+      "required": ["name", "forward"],
+      "additionalProperties": false
+    },
+
+    "Duration": {
+      "type": "object",
+      "properties": {
+        "seconds": { "type": "integer" },
+        "minutes": { "type": "integer" },
+        "hours": { "type": "integer" },
+        "days": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+
+    "RetryPolicy": {
+      "type": "object",
+      "properties": {
+        "maxAttempts": { "type": "integer", "default": 3 },
+        "backoff": { "enum": ["constant", "linear", "exponential"], "default": "exponential" },
+        "backoffMultiplier": { "type": "number", "default": 2, "description": "Multiplier for exponential backoff" },
+        "initialInterval": { "$ref": "#/$defs/Duration" },
+        "maxInterval": { "$ref": "#/$defs/Duration" }
+      },
+      "additionalProperties": false
+    },
+
+    "Schedule": {
+      "type": "object",
+      "description": "Scheduled task definition (borrowed from Temporal)",
+      "properties": {
+        "_kind": { "const": "schedule" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "Temporal" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "cron": { "type": "string", "description": "Cron expression" },
+        "timezone": { "type": "string", "default": "UTC" },
+        "action": {
+          "oneOf": [
+            { "type": "string", "description": "Function name to call" },
+            {
+              "type": "object",
+              "properties": {
+                "call": { "type": "string" },
+                "input": { "type": "object" }
+              },
+              "required": ["call"]
+            }
+          ]
+        },
+        "overlapPolicy": {
+          "enum": ["skip", "buffer_one", "cancel_other", "allow_all"],
+          "default": "skip"
+        }
+      },
+      "required": ["cron", "action"],
+      "additionalProperties": false
+    },
+
+    "Gateway": {
+      "type": "object",
+      "description": "BPMN-style gateway for workflow control (borrowed from BPMN)",
+      "properties": {
+        "_kind": { "const": "gateway" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "BPMN" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "type": {
+          "enum": ["exclusive", "parallel", "inclusive", "event_based"],
+          "default": "exclusive",
+          "description": "Gateway type: exclusive (XOR), parallel (AND), inclusive (OR), event_based"
+        },
+        "incomingFlows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source": { "type": "string", "description": "Source function, event, or gateway" }
+            },
+            "required": ["source"]
+          },
+          "description": "Incoming flow definitions"
+        },
+        "outgoingFlows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "target": { "type": "string", "description": "Target function, event, or gateway" },
+              "name": { "type": "string", "description": "Human-readable flow name" },
+              "condition": { "$ref": "expression.schema.json", "description": "Condition expression (for exclusive/inclusive)" },
+              "event": { "type": "string", "description": "Event reference (for event_based gateways)" },
+              "default": { "type": "boolean", "default": false, "description": "Default flow if no condition matches" }
+            },
+            "required": ["target"]
+          }
+        },
+        "joinCondition": {
+          "enum": ["all", "any", "count"],
+          "default": "all",
+          "description": "For parallel/inclusive merge: when to proceed"
+        },
+        "joinCount": {
+          "type": "integer",
+          "description": "Required count for 'count' joinCondition"
+        }
+      },
+      "required": ["type", "outgoingFlows"],
+      "additionalProperties": false
+    },
+
+    "Deadline": {
+      "type": "object",
+      "description": "Time-based deadline/SLA definition (borrowed from Temporal + BPMN)",
+      "properties": {
+        "_kind": { "const": "deadline" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "Temporal" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "entity": { "type": "string", "description": "Entity this deadline applies to" },
+        "duration": { "type": "string", "description": "Duration (ISO 8601 like P1D, PT2H or shortcut like 24h, 7d)" },
+        "startWhen": {
+          "type": "object",
+          "description": "When to start the deadline timer",
+          "properties": {
+            "field": { "type": "string", "description": "Date/time field to check against" },
+            "condition": { "type": "string", "description": "Trigger condition (created, updated, etc.)" }
+          },
+          "required": ["field"]
+        },
+        "action": { "type": "string", "description": "Function to call when deadline expires" },
+        "event": { "type": "string", "description": "Event to emit when deadline expires" },
+        "condition": { "$ref": "expression.schema.json", "description": "Optional condition for when deadline applies" },
+        "escalations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "after": { "type": "string", "description": "Duration after deadline start" },
+              "action": { "type": "string", "description": "Function to call" },
+              "event": { "type": "string", "description": "Event to emit" },
+              "severity": { "type": "string", "description": "Escalation severity level" },
+              "notify": { "type": "array", "items": { "type": "string" }, "description": "Roles/users to notify" }
+            }
+          },
+          "description": "Escalation levels"
+        }
+      },
+      "required": ["entity", "duration"],
+      "additionalProperties": false
+    },
+
+    "ExternalService": {
+      "type": "object",
+      "description": "External service definition (borrowed from Terraform Provider)",
+      "properties": {
+        "_kind": { "const": "external_service" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "Terraform" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "type": { "enum": ["rest", "graphql", "grpc", "soap"], "default": "rest" },
+        "baseUrl": { "type": "string" },
+        "auth": {
+          "type": "object",
+          "properties": {
+            "type": { "enum": ["none", "bearer", "basic", "api_key", "oauth2"] },
+            "config": { "type": "object" }
+          }
+        },
+        "operations": {
+          "type": "object",
+          "description": "Available operations",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              "path": { "type": "string" },
+              "requestBody": { "type": "object" },
+              "responseType": { "type": "string" }
+            }
+          }
+        },
+        "timeout": { "$ref": "#/$defs/Duration" },
+        "retry": { "$ref": "#/$defs/RetryPolicy" },
+        "circuitBreaker": {
+          "type": "object",
+          "properties": {
+            "failureThreshold": { "type": "integer", "default": 5 },
+            "recoveryTimeout": { "$ref": "#/$defs/Duration" }
+          }
+        }
+      },
+      "required": ["baseUrl"],
+      "additionalProperties": false
+    },
+
+    "Constraint": {
+      "type": "object",
+      "description": "Data constraint definition",
+      "properties": {
+        "_kind": { "const": "constraint" },
+        "type": { "enum": ["unique", "check", "foreign_key"] },
+        "entity": { "type": "string" },
+        "fields": { "type": "array", "items": { "type": "string" } },
+        "expr": { "$ref": "expression.schema.json" },
+        "message": { "type": "string" }
+      },
+      "required": ["type", "entity"],
+      "additionalProperties": false
+    },
+
+    "Relation": {
+      "type": "object",
+      "description": "Explicit relation definition",
+      "properties": {
+        "_kind": { "const": "relation" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "type": { "enum": ["one_to_one", "one_to_many", "many_to_one", "many_to_many"] },
+        "foreignKey": { "type": "string", "description": "Foreign key field name" },
+        "inverse": { "type": "string", "description": "Name of the inverse relation" },
+        "through": { "type": "string", "description": "Junction table for many_to_many" },
+        "cascade": {
+          "type": "object",
+          "properties": {
+            "delete": { "enum": ["cascade", "restrict", "set_null", "no_action"] },
+            "update": { "enum": ["cascade", "restrict", "set_null", "no_action"] }
+          }
+        }
+      },
+      "required": ["from", "to", "type"],
+      "additionalProperties": false
+    },
+
+    "DataPolicy": {
+      "type": "object",
+      "description": "Data lifecycle and privacy policy",
+      "properties": {
+        "_kind": { "const": "data_policy" },
+        "description": { "type": "string" },
+        "entity": { "type": "string" },
+        "retention": {
+          "type": "object",
+          "properties": {
+            "period": { "type": "string" },
+            "regulation": { "type": "string" }
+          }
+        },
+        "piiFields": { "type": "array", "items": { "type": "string" } },
+        "masking": {
+          "type": "object",
+          "properties": {
+            "fields": { "type": "array", "items": { "type": "string" } },
+            "strategy": { "enum": ["full", "partial", "hash", "tokenize"] },
+            "pattern": { "type": "string" }
+          }
+        }
+      },
+      "required": ["entity"],
+      "additionalProperties": false
+    },
+
+    "Audit": {
+      "type": "object",
+      "description": "Audit trail configuration (borrowed from PostgreSQL Trigger)",
+      "properties": {
+        "_kind": { "const": "audit_policy" },
+        "_source": {
+          "type": "object",
+          "properties": {
+            "borrowedFrom": { "type": "string", "default": "PostgreSQL" },
+            "rationale": { "type": "string" }
+          }
+        },
+        "description": { "type": "string" },
+        "entity": { "type": "string" },
+        "operations": {
+          "type": "array",
+          "items": { "enum": ["create", "read", "update", "delete", "*"] },
+          "description": "Operations to audit"
+        },
+        "fields": {
+          "oneOf": [
+            { "type": "array", "items": { "type": "string" } },
+            { "const": "all" }
+          ],
+          "description": "Fields to track (or 'all')"
+        },
+        "track": {
+          "type": "array",
+          "items": { "enum": ["who", "when", "what", "old_values", "new_values", "ip_address"] }
+        },
+        "retention": {
+          "type": "object",
+          "properties": {
+            "period": { "type": "string" },
+            "regulation": { "type": "string" }
+          }
+        },
+        "retentionDays": { "type": "integer", "description": "Number of days to retain audit logs" },
+        "immutable": { "type": "boolean", "default": true },
+        "hashChain": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "algorithm": { "type": "string", "default": "SHA-256" }
+          }
+        }
+      },
+      "required": ["entity"],
+      "additionalProperties": false
+    }
+  },
+
+  "type": "object",
+  "properties": {
+    "meta": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "version": { "type": "string" },
+        "domain": { "type": "string" }
+      },
+      "required": ["id", "title", "version"]
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Requirement" }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Entity" }
+    },
+    "derived": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/DerivedFormula" }
+    },
+    "functions": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Function" }
+    },
+    "scenarios": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Scenario" }
+    },
+    "invariants": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Invariant" }
+    },
+    "stateMachines": {
+      "type": "object",
+      "description": "State machine definitions",
+      "additionalProperties": { "$ref": "#/$defs/StateMachine" }
+    },
+    "events": {
+      "type": "object",
+      "description": "Domain event definitions",
+      "additionalProperties": { "$ref": "#/$defs/Event" }
+    },
+    "subscriptions": {
+      "type": "object",
+      "description": "Event subscription definitions",
+      "additionalProperties": { "$ref": "#/$defs/Subscription" }
+    },
+    "roles": {
+      "type": "object",
+      "description": "Role definitions for RBAC",
+      "additionalProperties": { "$ref": "#/$defs/Role" }
+    },
+    "sagas": {
+      "type": "object",
+      "description": "Saga definitions for distributed transactions",
+      "additionalProperties": { "$ref": "#/$defs/Saga" }
+    },
+    "schedules": {
+      "type": "object",
+      "description": "Scheduled task definitions",
+      "additionalProperties": { "$ref": "#/$defs/Schedule" }
+    },
+    "gateways": {
+      "type": "object",
+      "description": "BPMN-style gateway definitions for workflow control",
+      "additionalProperties": { "$ref": "#/$defs/Gateway" }
+    },
+    "deadlines": {
+      "type": "object",
+      "description": "Deadline/SLA definitions",
+      "additionalProperties": { "$ref": "#/$defs/Deadline" }
+    },
+    "externalServices": {
+      "type": "object",
+      "description": "External service definitions",
+      "additionalProperties": { "$ref": "#/$defs/ExternalService" }
+    },
+    "constraints": {
+      "type": "object",
+      "description": "Data constraint definitions",
+      "additionalProperties": { "$ref": "#/$defs/Constraint" }
+    },
+    "relations": {
+      "type": "object",
+      "description": "Explicit relation definitions",
+      "additionalProperties": { "$ref": "#/$defs/Relation" }
+    },
+    "dataPolicies": {
+      "type": "object",
+      "description": "Data lifecycle and privacy policies",
+      "additionalProperties": { "$ref": "#/$defs/DataPolicy" }
+    },
+    "auditPolicies": {
+      "type": "object",
+      "description": "Audit trail configurations",
+      "additionalProperties": { "$ref": "#/$defs/Audit" }
+    }
+  },
+  "required": ["meta", "state"],
+  "additionalProperties": false
+}

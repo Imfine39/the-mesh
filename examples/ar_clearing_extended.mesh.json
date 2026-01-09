@@ -1,0 +1,1054 @@
+{
+  "meta": {
+    "id": "ar-clearing-system-extended",
+    "title": "AR消込システム（拡張版：全プリミティブ検証）",
+    "version": "1.0.0",
+    "domain": "accounting.ar",
+    "description": "Phase 1拡張プリミティブの検証用サンプル"
+  },
+  "requirements": {
+    "REQ-CLR-001": {
+      "who": "経理部",
+      "why": "月次決算を5営業日以内に完了するため",
+      "what": "入金消込の自動化率を90%以上にする"
+    },
+    "REQ-CLR-002": {
+      "who": "経理部",
+      "why": "未消込滞留を防止するため",
+      "what": "30日超の未消込残高を5%以下に維持"
+    },
+    "REQ-CLR-003": {
+      "who": "監査対応",
+      "why": "監査証跡を確保するため",
+      "what": "全消込処理の履歴を保持"
+    },
+    "REQ-SEC-001": {
+      "who": "情報セキュリティ",
+      "why": "情報漏洩を防止するため",
+      "what": "役割ベースのアクセス制御を実装"
+    }
+  },
+  "state": {
+    "customer": {
+      "description": "得意先マスタ",
+      "fields": {
+        "customer_code": { "type": "string", "required": true },
+        "customer_name": { "type": "string", "required": true },
+        "payment_terms": { "type": "string", "required": true },
+        "payment_site": { "type": "int", "required": true },
+        "credit_limit": { "type": "int", "required": false },
+        "currency_code": { "type": "string", "required": true },
+        "business_type": {
+          "type": { "enum": ["CONSULTING", "PROPERTY", "SECURITIES", "OTHER"] },
+          "required": true
+        }
+      }
+    },
+    "ar_invoice": {
+      "description": "AR請求書",
+      "fields": {
+        "invoice_id": { "type": "string", "required": true },
+        "invoice_number": { "type": "string", "required": true },
+        "customer_code": { "type": { "ref": "customer" }, "required": true },
+        "invoice_date": { "type": "datetime", "required": true },
+        "due_date": { "type": "datetime", "required": true },
+        "currency_code": { "type": "string", "required": true },
+        "invoice_amount": { "type": "int", "required": true },
+        "tax_amount": { "type": "int", "required": true },
+        "total_amount": { "type": "int", "required": true },
+        "open_amount": { "type": "int", "required": true },
+        "status": {
+          "type": { "enum": ["OPEN", "PARTIAL", "CLOSED", "CANCELLED"] },
+          "required": true
+        },
+        "source_type": {
+          "type": { "enum": ["MANUAL", "PROJECT", "RENT", "DIVIDEND"] },
+          "required": true
+        },
+        "project_code": { "type": "string", "required": false },
+        "property_code": { "type": "string", "required": false }
+      }
+    },
+    "ar_receipt": {
+      "description": "入金データ",
+      "fields": {
+        "receipt_id": { "type": "string", "required": true },
+        "receipt_date": { "type": "datetime", "required": true },
+        "account_id": { "type": "string", "required": true },
+        "amount": { "type": "int", "required": true },
+        "currency_code": { "type": "string", "required": true },
+        "exchange_rate": { "type": "float", "required": true },
+        "payer_name": { "type": "string", "required": true },
+        "payer_account_no": { "type": "string", "required": false },
+        "reference": { "type": "string", "required": false },
+        "customer_code": { "type": { "ref": "customer" }, "required": false },
+        "receipt_type": {
+          "type": { "enum": ["EB_IMPORT", "MANUAL", "API"] },
+          "required": true
+        },
+        "status": {
+          "type": { "enum": ["UNPROCESSED", "MATCHED", "PARTIAL", "CLEARED", "SUSPENDED"] },
+          "required": true
+        },
+        "unallocated_amount": { "type": "int", "required": true }
+      }
+    },
+    "ar_clearing": {
+      "description": "AR消込（請求-入金マッチング）",
+      "fields": {
+        "clearing_id": { "type": "string", "required": true },
+        "receipt_id": { "type": { "ref": "ar_receipt" }, "required": true },
+        "invoice_id": { "type": { "ref": "ar_invoice" }, "required": true },
+        "clear_amount": { "type": "int", "required": true },
+        "clear_date": { "type": "datetime", "required": true },
+        "clear_type": {
+          "type": { "enum": ["AUTO", "MANUAL", "PARTIAL", "REVERSAL"] },
+          "required": true
+        },
+        "match_score": { "type": "int", "required": true },
+        "match_reasons": { "type": { "list": "string" }, "required": true },
+        "status": {
+          "type": { "enum": ["ACTIVE", "REVERSED"] },
+          "required": true
+        },
+        "reversed_at": { "type": "datetime", "required": false },
+        "reversal_reason": { "type": "string", "required": false },
+        "approved_by": { "type": "string", "required": false },
+        "approved_at": { "type": "datetime", "required": false }
+      }
+    }
+  },
+  "derived": {
+    "invoice_open_amount": {
+      "entity": "ar_invoice",
+      "description": "請求書の未消込残高",
+      "returns": "int",
+      "formula": {
+        "type": "binary",
+        "op": "sub",
+        "left": { "type": "self", "field": "total_amount" },
+        "right": {
+          "type": "agg",
+          "op": "sum",
+          "from": "ar_clearing",
+          "as": "clr",
+          "expr": { "type": "ref", "path": "clr.clear_amount" },
+          "where": {
+            "type": "binary",
+            "op": "and",
+            "left": {
+              "type": "binary",
+              "op": "eq",
+              "left": { "type": "ref", "path": "clr.invoice_id" },
+              "right": { "type": "self", "field": "invoice_id" }
+            },
+            "right": {
+              "type": "binary",
+              "op": "eq",
+              "left": { "type": "ref", "path": "clr.status" },
+              "right": { "type": "literal", "value": "ACTIVE" }
+            }
+          }
+        }
+      }
+    },
+    "receipt_unallocated": {
+      "entity": "ar_receipt",
+      "description": "入金の未消込残高",
+      "returns": "int",
+      "formula": {
+        "type": "binary",
+        "op": "sub",
+        "left": { "type": "self", "field": "amount" },
+        "right": {
+          "type": "agg",
+          "op": "sum",
+          "from": "ar_clearing",
+          "as": "clr",
+          "expr": { "type": "ref", "path": "clr.clear_amount" },
+          "where": {
+            "type": "binary",
+            "op": "and",
+            "left": {
+              "type": "binary",
+              "op": "eq",
+              "left": { "type": "ref", "path": "clr.receipt_id" },
+              "right": { "type": "self", "field": "receipt_id" }
+            },
+            "right": {
+              "type": "binary",
+              "op": "eq",
+              "left": { "type": "ref", "path": "clr.status" },
+              "right": { "type": "literal", "value": "ACTIVE" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "functions": {
+    "execute_clearing": {
+      "description": "入金を請求書に消込",
+      "implements": ["REQ-CLR-001", "REQ-CLR-003"],
+      "input": {
+        "receipt_id": { "type": "string", "required": true },
+        "invoice_id": { "type": "string", "required": true },
+        "amount": { "type": "int", "required": true },
+        "match_score": { "type": "int", "required": true },
+        "match_reasons": { "type": { "list": "string" }, "required": true },
+        "clear_type": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "in",
+            "left": { "type": "ref", "path": "ar_invoice.status" },
+            "right": { "type": "literal", "value": ["OPEN", "PARTIAL"] }
+          },
+          "entity": "ar_invoice",
+          "reason": "消込対象はOPENまたはPARTIALステータスの請求書のみ"
+        }
+      ],
+      "error": [
+        {
+          "code": "OVER_CLEARING",
+          "when": {
+            "type": "binary",
+            "op": "gt",
+            "left": { "type": "input", "name": "amount" },
+            "right": { "type": "ref", "path": "ar_invoice.open_amount" }
+          },
+          "reason": "消込額が請求残高を超過",
+          "http_status": 409
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "create": "ar_clearing",
+            "with": {
+              "receipt_id": { "type": "input", "name": "receipt_id" },
+              "invoice_id": { "type": "input", "name": "invoice_id" },
+              "clear_amount": { "type": "input", "name": "amount" },
+              "clear_date": { "type": "date", "op": "today" },
+              "clear_type": { "type": "input", "name": "clear_type" },
+              "match_score": { "type": "input", "name": "match_score" },
+              "match_reasons": { "type": "input", "name": "match_reasons" },
+              "status": { "type": "literal", "value": "ACTIVE" }
+            }
+          },
+          "reason": "消込レコード作成"
+        }
+      ],
+      "emits": ["PaymentAllocated"]
+    },
+    "reverse_clearing": {
+      "description": "消込の取消",
+      "implements": ["REQ-CLR-003"],
+      "input": {
+        "clearing_id": { "type": "string", "required": true },
+        "reason": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "ar_clearing.status" },
+            "right": { "type": "literal", "value": "ACTIVE" }
+          },
+          "entity": "ar_clearing",
+          "reason": "ACTIVEの消込のみ取消可能"
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "ar_clearing",
+            "target": { "type": "input", "name": "clearing_id" },
+            "set": {
+              "status": { "type": "literal", "value": "REVERSED" },
+              "reversed_at": { "type": "date", "op": "now" },
+              "reversal_reason": { "type": "input", "name": "reason" }
+            }
+          },
+          "reason": "消込ステータスを取消に変更"
+        }
+      ],
+      "emits": ["ClearingReversed"]
+    },
+    "approve_clearing": {
+      "description": "消込の承認",
+      "implements": ["REQ-CLR-001"],
+      "input": {
+        "clearing_id": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "principal",
+            "op": "has_role",
+            "role": "finance_manager"
+          },
+          "reason": "承認は財務マネージャーのみ可能"
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "ar_clearing",
+            "target": { "type": "input", "name": "clearing_id" },
+            "set": {
+              "approved_by": { "type": "principal", "op": "current_user" },
+              "approved_at": { "type": "date", "op": "now" }
+            }
+          },
+          "reason": "承認情報を記録"
+        }
+      ]
+    },
+    "notify_overdue": {
+      "description": "期日超過の通知送信",
+      "implements": ["REQ-CLR-002"],
+      "input": {
+        "invoice_id": { "type": "string", "required": true }
+      },
+      "post": []
+    },
+    "cancel_invoice": {
+      "description": "請求書のキャンセル",
+      "input": {
+        "invoice_id": { "type": "string", "required": true },
+        "reason": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "ar_invoice.status" },
+            "right": { "type": "literal", "value": "OPEN" }
+          },
+          "entity": "ar_invoice",
+          "reason": "OPENステータスの請求書のみキャンセル可能"
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "ar_invoice",
+            "target": { "type": "input", "name": "invoice_id" },
+            "set": {
+              "status": { "type": "literal", "value": "CANCELLED" }
+            }
+          },
+          "reason": "請求書をキャンセル"
+        }
+      ]
+    },
+    "match_receipt": {
+      "description": "入金のマッチング処理",
+      "input": {
+        "receipt_id": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "ar_receipt.status" },
+            "right": { "type": "literal", "value": "UNPROCESSED" }
+          },
+          "entity": "ar_receipt",
+          "reason": "未処理の入金のみマッチング可能"
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "ar_receipt",
+            "target": { "type": "input", "name": "receipt_id" },
+            "set": {
+              "status": { "type": "literal", "value": "MATCHED" }
+            }
+          },
+          "reason": "入金をマッチング済みに更新"
+        }
+      ]
+    },
+    "suspend_receipt": {
+      "description": "入金の保留",
+      "input": {
+        "receipt_id": { "type": "string", "required": true },
+        "reason": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "ar_receipt.status" },
+            "right": { "type": "literal", "value": "UNPROCESSED" }
+          },
+          "entity": "ar_receipt",
+          "reason": "未処理の入金のみ保留可能"
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "ar_receipt",
+            "target": { "type": "input", "name": "receipt_id" },
+            "set": {
+              "status": { "type": "literal", "value": "SUSPENDED" }
+            }
+          },
+          "reason": "入金を保留に更新"
+        }
+      ]
+    },
+    "resume_receipt": {
+      "description": "保留入金の再開",
+      "input": {
+        "receipt_id": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "ar_receipt.status" },
+            "right": { "type": "literal", "value": "SUSPENDED" }
+          },
+          "entity": "ar_receipt",
+          "reason": "保留中の入金のみ再開可能"
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "ar_receipt",
+            "target": { "type": "input", "name": "receipt_id" },
+            "set": {
+              "status": { "type": "literal", "value": "UNPROCESSED" }
+            }
+          },
+          "reason": "入金を未処理に戻す"
+        }
+      ]
+    }
+  },
+  "scenarios": {
+    "CLR-001": {
+      "title": "金額完全一致で自動消込成功",
+      "verifies": ["REQ-CLR-001"],
+      "given": {
+        "customer": {
+          "customer_code": "CUST-001",
+          "customer_name": "テスト株式会社",
+          "payment_terms": "月末締翌月末払",
+          "payment_site": 30,
+          "currency_code": "JPY",
+          "business_type": "CONSULTING"
+        },
+        "ar_invoice": {
+          "invoice_id": "INV-001",
+          "invoice_number": "INV-2026-00001",
+          "customer_code": "CUST-001",
+          "invoice_date": "2026-01-01T00:00:00Z",
+          "due_date": "2026-01-31T00:00:00Z",
+          "currency_code": "JPY",
+          "invoice_amount": 100000,
+          "tax_amount": 10000,
+          "total_amount": 110000,
+          "open_amount": 110000,
+          "status": "OPEN",
+          "source_type": "PROJECT",
+          "project_code": "PRJ-001"
+        },
+        "ar_receipt": {
+          "receipt_id": "RCP-001",
+          "receipt_date": "2026-01-15T00:00:00Z",
+          "account_id": "ACC-001",
+          "amount": 110000,
+          "currency_code": "JPY",
+          "exchange_rate": 1.0,
+          "payer_name": "テスト株式会社",
+          "receipt_type": "EB_IMPORT",
+          "status": "UNPROCESSED",
+          "unallocated_amount": 110000
+        }
+      },
+      "when": {
+        "call": "execute_clearing",
+        "input": {
+          "receipt_id": "RCP-001",
+          "invoice_id": "INV-001",
+          "amount": 110000,
+          "match_score": 90,
+          "match_reasons": ["AMOUNT_EXACT_MATCH", "CUSTOMER_MATCH"],
+          "clear_type": "AUTO"
+        }
+      },
+      "then": {
+        "success": true
+      }
+    }
+  },
+  "invariants": [
+    {
+      "id": "INV-001",
+      "entity": "ar_invoice",
+      "expr": {
+        "type": "binary",
+        "op": "ge",
+        "left": { "type": "self", "field": "open_amount" },
+        "right": { "type": "literal", "value": 0 }
+      },
+      "description": "請求書の残高は常に0以上"
+    },
+    {
+      "id": "INV-002",
+      "entity": "ar_clearing",
+      "expr": {
+        "type": "binary",
+        "op": "gt",
+        "left": { "type": "self", "field": "clear_amount" },
+        "right": { "type": "literal", "value": 0 }
+      },
+      "description": "消込額は常に正の値"
+    }
+  ],
+
+  "stateMachines": {
+    "invoice_status": {
+      "_kind": "state_machine",
+      "_source": {
+        "borrowedFrom": "XState",
+        "rationale": "階層状態・並行状態の表現力が高い"
+      },
+      "entity": "ar_invoice",
+      "field": "status",
+      "initial": "OPEN",
+      "description": "請求書のライフサイクル状態遷移",
+      "states": {
+        "OPEN": {
+          "description": "未消込（消込待ち）"
+        },
+        "PARTIAL": {
+          "description": "部分消込済み"
+        },
+        "CLOSED": {
+          "description": "完全消込済み",
+          "final": true
+        },
+        "CANCELLED": {
+          "description": "キャンセル済み",
+          "final": true
+        }
+      },
+      "transitions": [
+        {
+          "from": "OPEN",
+          "to": "PARTIAL",
+          "trigger_function": "execute_clearing",
+          "guard": {
+            "type": "binary",
+            "op": "gt",
+            "left": { "type": "call", "name": "invoice_open_amount" },
+            "right": { "type": "literal", "value": 0 }
+          }
+        },
+        {
+          "from": "OPEN",
+          "to": "CLOSED",
+          "trigger_function": "execute_clearing",
+          "guard": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "call", "name": "invoice_open_amount" },
+            "right": { "type": "literal", "value": 0 }
+          }
+        },
+        {
+          "from": "PARTIAL",
+          "to": "CLOSED",
+          "trigger_function": "execute_clearing",
+          "guard": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "call", "name": "invoice_open_amount" },
+            "right": { "type": "literal", "value": 0 }
+          }
+        },
+        {
+          "from": "PARTIAL",
+          "to": "OPEN",
+          "trigger_function": "reverse_clearing"
+        },
+        {
+          "from": "CLOSED",
+          "to": "OPEN",
+          "trigger_function": "reverse_clearing"
+        },
+        {
+          "from": "OPEN",
+          "to": "CANCELLED",
+          "trigger_function": "cancel_invoice"
+        }
+      ]
+    },
+    "receipt_status": {
+      "_kind": "state_machine",
+      "_source": {
+        "borrowedFrom": "XState",
+        "rationale": "階層状態・並行状態の表現力が高い"
+      },
+      "entity": "ar_receipt",
+      "field": "status",
+      "initial": "UNPROCESSED",
+      "description": "入金のライフサイクル状態遷移",
+      "states": {
+        "UNPROCESSED": {
+          "description": "未処理（取込み直後）"
+        },
+        "MATCHED": {
+          "description": "マッチング済み（消込候補あり）"
+        },
+        "PARTIAL": {
+          "description": "部分消込済み"
+        },
+        "CLEARED": {
+          "description": "完全消込済み",
+          "final": true
+        },
+        "SUSPENDED": {
+          "description": "保留中"
+        }
+      },
+      "transitions": [
+        {
+          "from": "UNPROCESSED",
+          "to": "MATCHED",
+          "trigger_function": "match_receipt"
+        },
+        {
+          "from": "UNPROCESSED",
+          "to": "CLEARED",
+          "trigger_function": "execute_clearing"
+        },
+        {
+          "from": "MATCHED",
+          "to": "PARTIAL",
+          "trigger_function": "execute_clearing",
+          "guard": {
+            "type": "binary",
+            "op": "gt",
+            "left": { "type": "call", "name": "receipt_unallocated" },
+            "right": { "type": "literal", "value": 0 }
+          }
+        },
+        {
+          "from": "MATCHED",
+          "to": "CLEARED",
+          "trigger_function": "execute_clearing",
+          "guard": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "call", "name": "receipt_unallocated" },
+            "right": { "type": "literal", "value": 0 }
+          }
+        },
+        {
+          "from": "PARTIAL",
+          "to": "CLEARED",
+          "trigger_function": "execute_clearing"
+        },
+        {
+          "from": "UNPROCESSED",
+          "to": "SUSPENDED",
+          "trigger_function": "suspend_receipt"
+        },
+        {
+          "from": "SUSPENDED",
+          "to": "UNPROCESSED",
+          "trigger_function": "resume_receipt"
+        }
+      ]
+    }
+  },
+
+  "events": {
+    "PaymentAllocated": {
+      "_kind": "event",
+      "_source": {
+        "borrowedFrom": "Event Sourcing",
+        "rationale": "ドメインイベントによる疎結合な連携"
+      },
+      "description": "入金が請求書に消込された",
+      "emittedBy": ["execute_clearing"],
+      "payload": {
+        "clearing_id": { "type": "string" },
+        "receipt_id": { "type": "string" },
+        "invoice_id": { "type": "string" },
+        "amount": { "type": "int" },
+        "timestamp": { "type": "datetime" }
+      }
+    },
+    "ClearingReversed": {
+      "_kind": "event",
+      "_source": {
+        "borrowedFrom": "Event Sourcing"
+      },
+      "description": "消込が取り消された",
+      "emittedBy": ["reverse_clearing"],
+      "payload": {
+        "clearing_id": { "type": "string" },
+        "reason": { "type": "string" },
+        "timestamp": { "type": "datetime" }
+      }
+    },
+    "InvoiceOverdue": {
+      "_kind": "event",
+      "description": "請求書が期日超過になった",
+      "payload": {
+        "invoice_id": { "type": "string" },
+        "days_overdue": { "type": "int" },
+        "open_amount": { "type": "int" }
+      }
+    }
+  },
+
+  "subscriptions": {
+    "notify_on_allocation": {
+      "_kind": "subscription",
+      "_source": {
+        "borrowedFrom": "GraphQL Subscriptions"
+      },
+      "event": "PaymentAllocated",
+      "handler": "notify_overdue",
+      "description": "消込完了時に通知"
+    }
+  },
+
+  "roles": {
+    "accountant": {
+      "_kind": "role",
+      "_source": {
+        "borrowedFrom": "ZenStack",
+        "rationale": "宣言的なアクセス制御ポリシー"
+      },
+      "description": "経理担当者",
+      "permissions": ["view_invoice", "view_receipt", "execute_clearing"],
+      "entityPermissions": [
+        {
+          "entity": "ar_invoice",
+          "operations": ["read"]
+        },
+        {
+          "entity": "ar_receipt",
+          "operations": ["read"]
+        },
+        {
+          "entity": "ar_clearing",
+          "operations": ["read", "create"]
+        }
+      ]
+    },
+    "finance_manager": {
+      "_kind": "role",
+      "_source": {
+        "borrowedFrom": "ZenStack"
+      },
+      "description": "財務マネージャー",
+      "inherits": ["accountant"],
+      "permissions": ["approve_clearing", "reverse_clearing", "view_audit"],
+      "entityPermissions": [
+        {
+          "entity": "ar_clearing",
+          "operations": ["read", "create", "update", "delete"]
+        }
+      ]
+    },
+    "auditor": {
+      "_kind": "role",
+      "description": "監査担当者",
+      "permissions": ["view_audit", "view_all"],
+      "entityPermissions": [
+        {
+          "entity": "ar_invoice",
+          "operations": ["read"]
+        },
+        {
+          "entity": "ar_receipt",
+          "operations": ["read"]
+        },
+        {
+          "entity": "ar_clearing",
+          "operations": ["read"]
+        }
+      ]
+    }
+  },
+
+  "sagas": {
+    "bulk_clearing": {
+      "_kind": "saga",
+      "_source": {
+        "borrowedFrom": "Temporal",
+        "rationale": "長時間トランザクションの補償パターン"
+      },
+      "description": "一括消込処理（複数請求書への消込）",
+      "steps": [
+        {
+          "name": "validate_inputs",
+          "forward": "execute_clearing",
+          "compensate": "reverse_clearing"
+        }
+      ],
+      "onFailure": "compensate_all"
+    }
+  },
+
+  "schedules": {
+    "daily_overdue_check": {
+      "_kind": "schedule",
+      "_source": {
+        "borrowedFrom": "Temporal"
+      },
+      "description": "毎日の期日超過チェック",
+      "cron": "0 9 * * *",
+      "action": "notify_overdue",
+      "timezone": "Asia/Tokyo"
+    }
+  },
+
+  "gateways": {
+    "receipt_processing_gateway": {
+      "_kind": "gateway",
+      "_source": {
+        "borrowedFrom": "BPMN",
+        "rationale": "ワークフロー分岐制御"
+      },
+      "type": "exclusive",
+      "description": "入金処理の分岐（マッチング結果による）",
+      "outgoingFlows": [
+        {
+          "target": "execute_clearing",
+          "condition": {
+            "type": "binary",
+            "op": "ge",
+            "left": { "type": "ref", "path": "match_score" },
+            "right": { "type": "literal", "value": 80 }
+          },
+          "name": "高スコアマッチ"
+        },
+        {
+          "target": "suspend_receipt",
+          "condition": {
+            "type": "binary",
+            "op": "lt",
+            "left": { "type": "ref", "path": "match_score" },
+            "right": { "type": "literal", "value": 50 }
+          },
+          "name": "低スコア（要確認）"
+        },
+        {
+          "target": "match_receipt",
+          "default": true,
+          "name": "中間スコア（手動確認）"
+        }
+      ],
+      "incomingFlows": [
+        {
+          "source": "match_receipt"
+        }
+      ]
+    },
+    "parallel_notification_gateway": {
+      "_kind": "gateway",
+      "type": "parallel",
+      "description": "消込完了時の並列通知",
+      "outgoingFlows": [
+        {
+          "target": "notify_overdue",
+          "name": "メール通知"
+        },
+        {
+          "target": "PaymentAllocated",
+          "name": "イベント発行"
+        }
+      ]
+    }
+  },
+
+  "deadlines": {
+    "invoice_payment_sla": {
+      "_kind": "deadline",
+      "_source": {
+        "borrowedFrom": "Temporal + BPMN",
+        "rationale": "SLA管理とエスカレーション"
+      },
+      "entity": "ar_invoice",
+      "description": "請求書支払いSLA（期日超過時のエスカレーション）",
+      "duration": "P30D",
+      "startWhen": {
+        "field": "invoice_date",
+        "condition": "created"
+      },
+      "action": "notify_overdue",
+      "escalations": [
+        {
+          "after": "7d",
+          "event": "InvoiceOverdue",
+          "action": "notify_overdue",
+          "severity": "warning"
+        },
+        {
+          "after": "P14D",
+          "event": "InvoiceOverdue",
+          "severity": "critical"
+        }
+      ]
+    },
+    "clearing_approval_deadline": {
+      "_kind": "deadline",
+      "entity": "ar_clearing",
+      "description": "消込承認期限（24時間以内）",
+      "duration": "24h",
+      "startWhen": {
+        "field": "clear_date",
+        "condition": "created"
+      },
+      "action": "approve_clearing"
+    }
+  },
+
+  "constraints": {
+    "unique_invoice_number": {
+      "_kind": "constraint",
+      "type": "unique",
+      "entity": "ar_invoice",
+      "fields": ["invoice_number"],
+      "message": "請求書番号は一意である必要があります"
+    },
+    "positive_amount": {
+      "_kind": "constraint",
+      "type": "check",
+      "entity": "ar_clearing",
+      "expr": {
+        "type": "binary",
+        "op": "gt",
+        "left": { "type": "self", "field": "clear_amount" },
+        "right": { "type": "literal", "value": 0 }
+      },
+      "message": "消込額は正の値である必要があります"
+    }
+  },
+
+  "relations": {
+    "customer_invoices": {
+      "_kind": "relation",
+      "from": "customer",
+      "to": "ar_invoice",
+      "type": "one_to_many",
+      "foreignKey": "customer_code",
+      "inverse": "invoice_customer",
+      "cascade": {
+        "delete": "restrict",
+        "update": "cascade"
+      }
+    },
+    "invoice_clearings": {
+      "_kind": "relation",
+      "from": "ar_invoice",
+      "to": "ar_clearing",
+      "type": "one_to_many",
+      "foreignKey": "invoice_id",
+      "inverse": "clearing_invoice"
+    },
+    "receipt_clearings": {
+      "_kind": "relation",
+      "from": "ar_receipt",
+      "to": "ar_clearing",
+      "type": "one_to_many",
+      "foreignKey": "receipt_id",
+      "inverse": "clearing_receipt"
+    }
+  },
+
+  "dataPolicies": {
+    "receipt_pii": {
+      "_kind": "data_policy",
+      "entity": "ar_receipt",
+      "description": "入金データの個人情報保護ポリシー",
+      "piiFields": ["payer_name", "payer_account_no"],
+      "retention": {
+        "period": "7 years",
+        "regulation": "電帳法"
+      },
+      "masking": {
+        "fields": ["payer_account_no"],
+        "strategy": "partial",
+        "pattern": "****-****-####"
+      }
+    },
+    "customer_pii": {
+      "_kind": "data_policy",
+      "entity": "customer",
+      "piiFields": ["customer_name"],
+      "retention": {
+        "period": "10 years"
+      }
+    }
+  },
+
+  "auditPolicies": {
+    "clearing_audit": {
+      "_kind": "audit_policy",
+      "_source": {
+        "borrowedFrom": "PostgreSQL Trigger",
+        "rationale": "監査ログの自動生成"
+      },
+      "entity": "ar_clearing",
+      "description": "消込の全操作を監査ログに記録",
+      "operations": ["create", "update", "delete"],
+      "fields": ["all"],
+      "retentionDays": 2555
+    },
+    "invoice_status_audit": {
+      "_kind": "audit_policy",
+      "entity": "ar_invoice",
+      "description": "請求書ステータス変更を監査",
+      "operations": ["update"],
+      "fields": ["status", "open_amount"]
+    }
+  },
+
+  "externalServices": {
+    "bank_api": {
+      "_kind": "external_service",
+      "_source": {
+        "borrowedFrom": "Terraform Provider",
+        "rationale": "外部サービス連携の宣言的定義"
+      },
+      "description": "銀行API（入金データ取得）",
+      "baseUrl": "https://api.bank.example.com/v1",
+      "auth": {
+        "type": "oauth2",
+        "tokenUrl": "https://auth.bank.example.com/token"
+      },
+      "operations": {
+        "getTransactions": {
+          "method": "GET",
+          "path": "/accounts/{accountId}/transactions"
+        }
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "backoffMultiplier": 2
+      }
+    }
+  }
+}
