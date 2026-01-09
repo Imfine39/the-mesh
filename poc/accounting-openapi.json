@@ -1,0 +1,921 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "会計コアシステム（上流工程ベース）",
+    "version": "1.0.0",
+    "description": "Generated from TRIR specification"
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "paths": {
+    "/generate-journal-from-voucher": {
+      "post": {
+        "operationId": "generate_journal_from_voucher",
+        "summary": "伝票から仕訳を自動生成",
+        "tags": [
+          "journal_header"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "voucher_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "voucher_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VOUCHER_NOT_PENDING: 伝票がPENDING状態ではない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "VOUCHER_NOT_PENDING"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_PATTERN: 取引パターンが無効; INVALID_TAX_CODE: 税コードが無効",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "INVALID_PATTERN",
+                        "INVALID_TAX_CODE"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/approve-journal": {
+      "post": {
+        "operationId": "approve_journal",
+        "summary": "仕訳の承認",
+        "tags": [
+          "journal_header"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "journal_id": {
+                    "type": "string"
+                  },
+                  "approver_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "journal_id",
+                  "approver_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "JOURNAL_NOT_PENDING: 仕訳がPENDING状態ではない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "JOURNAL_NOT_PENDING"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BALANCE_MISMATCH: 貸借バランスが不一致",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "BALANCE_MISMATCH"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/post-journal": {
+      "post": {
+        "operationId": "post_journal",
+        "summary": "仕訳の転記",
+        "tags": [
+          "journal_header"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "journal_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "journal_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "JOURNAL_NOT_APPROVED: 仕訳が承認済みではない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "JOURNAL_NOT_APPROVED"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reverse-journal": {
+      "post": {
+        "operationId": "reverse_journal",
+        "summary": "仕訳の取消（反対仕訳生成）",
+        "tags": [
+          "journal_header"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "journal_id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "journal_id",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "JOURNAL_NOT_POSTED: 仕訳が転記済みではない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "JOURNAL_NOT_POSTED"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Account": {
+        "type": "object",
+        "properties": {
+          "account_code": {
+            "type": "string"
+          },
+          "account_name": {
+            "type": "string"
+          },
+          "account_type": {
+            "type": "string",
+            "enum": [
+              "BS_ASSET",
+              "BS_LIABILITY",
+              "BS_EQUITY",
+              "PL_REVENUE",
+              "PL_EXPENSE"
+            ]
+          },
+          "account_category": {
+            "type": "string",
+            "enum": [
+              "CASH",
+              "AR",
+              "AP",
+              "INVENTORY",
+              "FA",
+              "REVENUE",
+              "COGS",
+              "OPEX",
+              "TAX",
+              "OTHER"
+            ]
+          },
+          "tax_applicable": {
+            "type": "boolean"
+          },
+          "currency_code": {
+            "type": "string"
+          },
+          "is_active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "account_code",
+          "account_name",
+          "account_type",
+          "account_category",
+          "tax_applicable",
+          "currency_code",
+          "is_active"
+        ],
+        "description": "勘定科目マスタ"
+      },
+      "TaxCode": {
+        "type": "object",
+        "properties": {
+          "tax_code": {
+            "type": "string"
+          },
+          "tax_name": {
+            "type": "string"
+          },
+          "tax_rate": {
+            "type": "number"
+          },
+          "tax_type": {
+            "type": "string",
+            "enum": [
+              "SALES",
+              "PURCHASE",
+              "EXEMPT",
+              "NON_TAXABLE"
+            ]
+          },
+          "invoice_type": {
+            "type": "string",
+            "enum": [
+              "QUALIFIED",
+              "NON_QUALIFIED_80",
+              "NON_QUALIFIED_50",
+              "EXEMPT"
+            ]
+          },
+          "deductible_rate": {
+            "type": "number"
+          },
+          "effective_from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "effective_to": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "tax_code",
+          "tax_name",
+          "tax_rate",
+          "tax_type",
+          "invoice_type",
+          "deductible_rate",
+          "effective_from"
+        ],
+        "description": "消費税コードマスタ（インボイス制度対応）"
+      },
+      "Segment": {
+        "type": "object",
+        "properties": {
+          "segment_type": {
+            "type": "string",
+            "enum": [
+              "PC",
+              "CC",
+              "PRJ",
+              "UNIT",
+              "PF"
+            ]
+          },
+          "segment_code": {
+            "type": "string"
+          },
+          "segment_name": {
+            "type": "string"
+          },
+          "parent_code": {
+            "type": "string"
+          },
+          "is_active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "segment_type",
+          "segment_code",
+          "segment_name",
+          "is_active"
+        ],
+        "description": "分析軸マスタ"
+      },
+      "JournalHeader": {
+        "type": "object",
+        "properties": {
+          "journal_id": {
+            "type": "string"
+          },
+          "journal_number": {
+            "type": "string"
+          },
+          "journal_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "posting_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fiscal_year": {
+            "type": "integer"
+          },
+          "fiscal_period": {
+            "type": "integer"
+          },
+          "journal_type": {
+            "type": "string",
+            "enum": [
+              "NORMAL",
+              "ADJUSTMENT",
+              "CLOSING",
+              "REVERSAL",
+              "ACCRUAL"
+            ]
+          },
+          "source_module": {
+            "type": "string",
+            "enum": [
+              "AR",
+              "AP",
+              "FA",
+              "CM",
+              "GL",
+              "TAX",
+              "PROP",
+              "SEC"
+            ]
+          },
+          "source_doc_type": {
+            "type": "string"
+          },
+          "source_doc_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "currency_code": {
+            "type": "string"
+          },
+          "exchange_rate": {
+            "type": "number"
+          },
+          "total_debit": {
+            "type": "integer"
+          },
+          "total_credit": {
+            "type": "integer"
+          },
+          "total_debit_fc": {
+            "type": "integer"
+          },
+          "total_credit_fc": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "PENDING",
+              "APPROVED",
+              "POSTED",
+              "REJECTED",
+              "CANCELLED"
+            ]
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "approved_by": {
+            "type": "string"
+          },
+          "posted_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "journal_id",
+          "journal_number",
+          "journal_date",
+          "posting_date",
+          "fiscal_year",
+          "fiscal_period",
+          "journal_type",
+          "source_module",
+          "currency_code",
+          "exchange_rate",
+          "total_debit",
+          "total_credit",
+          "status",
+          "created_by"
+        ],
+        "description": "仕訳ヘッダ"
+      },
+      "JournalLine": {
+        "type": "object",
+        "properties": {
+          "line_id": {
+            "type": "string"
+          },
+          "journal_id": {
+            "type": "string",
+            "description": "Reference to JournalHeader"
+          },
+          "line_number": {
+            "type": "integer"
+          },
+          "account_code": {
+            "type": "string",
+            "description": "Reference to Account"
+          },
+          "debit_amount": {
+            "type": "integer"
+          },
+          "credit_amount": {
+            "type": "integer"
+          },
+          "debit_amount_fc": {
+            "type": "integer"
+          },
+          "credit_amount_fc": {
+            "type": "integer"
+          },
+          "tax_code": {
+            "type": "string",
+            "description": "Reference to TaxCode"
+          },
+          "tax_amount": {
+            "type": "integer"
+          },
+          "tax_base_amount": {
+            "type": "integer"
+          },
+          "pc_code": {
+            "type": "string"
+          },
+          "cc_code": {
+            "type": "string"
+          },
+          "project_code": {
+            "type": "string"
+          },
+          "unit_code": {
+            "type": "string"
+          },
+          "pf_code": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "partner_type": {
+            "type": "string",
+            "enum": [
+              "CUSTOMER",
+              "VENDOR",
+              "EMPLOYEE",
+              "INTERNAL",
+              "OTHER"
+            ]
+          },
+          "partner_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "line_id",
+          "journal_id",
+          "line_number",
+          "account_code",
+          "debit_amount",
+          "credit_amount"
+        ],
+        "description": "仕訳明細"
+      },
+      "TransactionPattern": {
+        "type": "object",
+        "properties": {
+          "pattern_code": {
+            "type": "string"
+          },
+          "pattern_name": {
+            "type": "string"
+          },
+          "pattern_category": {
+            "type": "string",
+            "enum": [
+              "SALES",
+              "PURCHASE",
+              "CASH",
+              "FA",
+              "TAX",
+              "ADJUSTMENT"
+            ]
+          },
+          "source_module": {
+            "type": "string",
+            "enum": [
+              "AR",
+              "AP",
+              "FA",
+              "CM",
+              "GL",
+              "TAX",
+              "PROP",
+              "SEC"
+            ]
+          },
+          "debit_account_code": {
+            "type": "string",
+            "description": "Reference to Account"
+          },
+          "credit_account_code": {
+            "type": "string",
+            "description": "Reference to Account"
+          },
+          "tax_handling": {
+            "type": "string",
+            "enum": [
+              "INCLUSIVE",
+              "EXCLUSIVE",
+              "EXEMPT",
+              "NON_TAXABLE"
+            ]
+          },
+          "auto_post": {
+            "type": "boolean"
+          },
+          "reversal_pattern_code": {
+            "type": "string"
+          },
+          "is_active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pattern_code",
+          "pattern_name",
+          "pattern_category",
+          "source_module",
+          "debit_account_code",
+          "credit_account_code",
+          "tax_handling",
+          "auto_post",
+          "is_active"
+        ],
+        "description": "取引パターンマスタ"
+      },
+      "Voucher": {
+        "type": "object",
+        "properties": {
+          "voucher_id": {
+            "type": "string"
+          },
+          "voucher_type": {
+            "type": "string",
+            "enum": [
+              "SALES_INVOICE",
+              "PURCHASE_INVOICE",
+              "RECEIPT",
+              "PAYMENT",
+              "EXPENSE",
+              "ADJUSTMENT"
+            ]
+          },
+          "voucher_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "partner_type": {
+            "type": "string",
+            "enum": [
+              "CUSTOMER",
+              "VENDOR",
+              "EMPLOYEE",
+              "INTERNAL"
+            ]
+          },
+          "partner_code": {
+            "type": "string"
+          },
+          "currency_code": {
+            "type": "string"
+          },
+          "exchange_rate": {
+            "type": "number"
+          },
+          "gross_amount": {
+            "type": "integer"
+          },
+          "tax_amount": {
+            "type": "integer"
+          },
+          "net_amount": {
+            "type": "integer"
+          },
+          "pattern_code": {
+            "type": "string",
+            "description": "Reference to TransactionPattern"
+          },
+          "tax_code": {
+            "type": "string",
+            "description": "Reference to TaxCode"
+          },
+          "pc_code": {
+            "type": "string"
+          },
+          "cc_code": {
+            "type": "string"
+          },
+          "project_code": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "PENDING",
+              "PROCESSED",
+              "CANCELLED"
+            ]
+          },
+          "journal_id": {
+            "type": "string",
+            "description": "Reference to JournalHeader"
+          }
+        },
+        "required": [
+          "voucher_id",
+          "voucher_type",
+          "voucher_date",
+          "partner_type",
+          "partner_code",
+          "currency_code",
+          "exchange_rate",
+          "gross_amount",
+          "tax_amount",
+          "net_amount",
+          "pattern_code",
+          "tax_code",
+          "status"
+        ],
+        "description": "伝票（仕訳生成元）"
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "error"
+        ]
+      }
+    }
+  }
+}

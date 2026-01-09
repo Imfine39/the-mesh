@@ -1,0 +1,961 @@
+{
+  "meta": {
+    "id": "accounting-core-system",
+    "title": "会計コアシステム（上流工程ベース）",
+    "version": "1.0.0",
+    "domain": "accounting.core"
+  },
+  "requirements": {
+    "REQ-GL-001": {
+      "who": "経理部",
+      "why": "正確な財務諸表を作成するため",
+      "what": "全ての取引を適切な勘定科目で仕訳",
+      "conditions": [
+        {
+          "id": "AC-001",
+          "description": "仕訳の貸借は必ず一致",
+          "acceptance": ["借方合計 = 貸方合計"]
+        },
+        {
+          "id": "AC-002",
+          "description": "消費税の適切な処理",
+          "acceptance": ["インボイス制度対応", "税コード別集計"]
+        }
+      ]
+    },
+    "REQ-GL-002": {
+      "who": "経理部",
+      "why": "月次決算を迅速に完了するため",
+      "what": "取引パターンに基づく自動仕訳生成",
+      "conditions": [
+        {
+          "id": "AC-003",
+          "description": "42種類の取引パターンを自動処理",
+          "acceptance": ["売上計上", "入金消込", "仕入計上", "支払処理"]
+        }
+      ]
+    },
+    "REQ-GL-003": {
+      "who": "監査対応",
+      "why": "監査証跡を確保するため",
+      "what": "全仕訳の履歴と承認フローを保持",
+      "conditions": [
+        {
+          "id": "AC-004",
+          "description": "仕訳の作成・承認・取消の完全な履歴"
+        }
+      ]
+    }
+  },
+  "state": {
+    "account": {
+      "description": "勘定科目マスタ",
+      "fields": {
+        "account_code": { "type": "string", "required": true },
+        "account_name": { "type": "string", "required": true },
+        "account_type": {
+          "type": { "enum": ["BS_ASSET", "BS_LIABILITY", "BS_EQUITY", "PL_REVENUE", "PL_EXPENSE"] },
+          "required": true
+        },
+        "account_category": {
+          "type": { "enum": ["CASH", "AR", "AP", "INVENTORY", "FA", "REVENUE", "COGS", "OPEX", "TAX", "OTHER"] },
+          "required": true
+        },
+        "tax_applicable": { "type": "bool", "required": true },
+        "currency_code": { "type": "string", "required": true },
+        "is_active": { "type": "bool", "required": true }
+      }
+    },
+    "tax_code": {
+      "description": "消費税コードマスタ（インボイス制度対応）",
+      "fields": {
+        "tax_code": { "type": "string", "required": true },
+        "tax_name": { "type": "string", "required": true },
+        "tax_rate": { "type": "float", "required": true },
+        "tax_type": {
+          "type": { "enum": ["SALES", "PURCHASE", "EXEMPT", "NON_TAXABLE"] },
+          "required": true
+        },
+        "invoice_type": {
+          "type": { "enum": ["QUALIFIED", "NON_QUALIFIED_80", "NON_QUALIFIED_50", "EXEMPT"] },
+          "required": true
+        },
+        "deductible_rate": { "type": "float", "required": true },
+        "effective_from": { "type": "datetime", "required": true },
+        "effective_to": { "type": "datetime", "required": false }
+      }
+    },
+    "segment": {
+      "description": "分析軸マスタ",
+      "fields": {
+        "segment_type": {
+          "type": { "enum": ["PC", "CC", "PRJ", "UNIT", "PF"] },
+          "required": true
+        },
+        "segment_code": { "type": "string", "required": true },
+        "segment_name": { "type": "string", "required": true },
+        "parent_code": { "type": "string", "required": false },
+        "is_active": { "type": "bool", "required": true }
+      }
+    },
+    "journal_header": {
+      "description": "仕訳ヘッダ",
+      "fields": {
+        "journal_id": { "type": "string", "required": true },
+        "journal_number": { "type": "string", "required": true },
+        "journal_date": { "type": "datetime", "required": true },
+        "posting_date": { "type": "datetime", "required": true },
+        "fiscal_year": { "type": "int", "required": true },
+        "fiscal_period": { "type": "int", "required": true },
+        "journal_type": {
+          "type": { "enum": ["NORMAL", "ADJUSTMENT", "CLOSING", "REVERSAL", "ACCRUAL"] },
+          "required": true
+        },
+        "source_module": {
+          "type": { "enum": ["AR", "AP", "FA", "CM", "GL", "TAX", "PROP", "SEC"] },
+          "required": true
+        },
+        "source_doc_type": { "type": "string", "required": false },
+        "source_doc_id": { "type": "string", "required": false },
+        "description": { "type": "string", "required": false },
+        "currency_code": { "type": "string", "required": true },
+        "exchange_rate": { "type": "float", "required": true },
+        "total_debit": { "type": "int", "required": true },
+        "total_credit": { "type": "int", "required": true },
+        "total_debit_fc": { "type": "int", "required": false },
+        "total_credit_fc": { "type": "int", "required": false },
+        "status": {
+          "type": { "enum": ["DRAFT", "PENDING", "APPROVED", "POSTED", "REJECTED", "CANCELLED"] },
+          "required": true
+        },
+        "created_by": { "type": "string", "required": true },
+        "approved_by": { "type": "string", "required": false },
+        "posted_at": { "type": "datetime", "required": false }
+      }
+    },
+    "journal_line": {
+      "description": "仕訳明細",
+      "fields": {
+        "line_id": { "type": "string", "required": true },
+        "journal_id": { "type": { "ref": "journal_header" }, "required": true },
+        "line_number": { "type": "int", "required": true },
+        "account_code": { "type": { "ref": "account" }, "required": true },
+        "debit_amount": { "type": "int", "required": true },
+        "credit_amount": { "type": "int", "required": true },
+        "debit_amount_fc": { "type": "int", "required": false },
+        "credit_amount_fc": { "type": "int", "required": false },
+        "tax_code": { "type": { "ref": "tax_code" }, "required": false },
+        "tax_amount": { "type": "int", "required": false },
+        "tax_base_amount": { "type": "int", "required": false },
+        "pc_code": { "type": "string", "required": false },
+        "cc_code": { "type": "string", "required": false },
+        "project_code": { "type": "string", "required": false },
+        "unit_code": { "type": "string", "required": false },
+        "pf_code": { "type": "string", "required": false },
+        "description": { "type": "string", "required": false },
+        "partner_type": {
+          "type": { "enum": ["CUSTOMER", "VENDOR", "EMPLOYEE", "INTERNAL", "OTHER"] },
+          "required": false
+        },
+        "partner_code": { "type": "string", "required": false }
+      }
+    },
+    "transaction_pattern": {
+      "description": "取引パターンマスタ",
+      "fields": {
+        "pattern_code": { "type": "string", "required": true },
+        "pattern_name": { "type": "string", "required": true },
+        "pattern_category": {
+          "type": { "enum": ["SALES", "PURCHASE", "CASH", "FA", "TAX", "ADJUSTMENT"] },
+          "required": true
+        },
+        "source_module": {
+          "type": { "enum": ["AR", "AP", "FA", "CM", "GL", "TAX", "PROP", "SEC"] },
+          "required": true
+        },
+        "debit_account_code": { "type": { "ref": "account" }, "required": true },
+        "credit_account_code": { "type": { "ref": "account" }, "required": true },
+        "tax_handling": {
+          "type": { "enum": ["INCLUSIVE", "EXCLUSIVE", "EXEMPT", "NON_TAXABLE"] },
+          "required": true
+        },
+        "auto_post": { "type": "bool", "required": true },
+        "reversal_pattern_code": { "type": "string", "required": false },
+        "is_active": { "type": "bool", "required": true }
+      }
+    },
+    "voucher": {
+      "description": "伝票（仕訳生成元）",
+      "fields": {
+        "voucher_id": { "type": "string", "required": true },
+        "voucher_type": {
+          "type": { "enum": ["SALES_INVOICE", "PURCHASE_INVOICE", "RECEIPT", "PAYMENT", "EXPENSE", "ADJUSTMENT"] },
+          "required": true
+        },
+        "voucher_date": { "type": "datetime", "required": true },
+        "partner_type": {
+          "type": { "enum": ["CUSTOMER", "VENDOR", "EMPLOYEE", "INTERNAL"] },
+          "required": true
+        },
+        "partner_code": { "type": "string", "required": true },
+        "currency_code": { "type": "string", "required": true },
+        "exchange_rate": { "type": "float", "required": true },
+        "gross_amount": { "type": "int", "required": true },
+        "tax_amount": { "type": "int", "required": true },
+        "net_amount": { "type": "int", "required": true },
+        "pattern_code": { "type": { "ref": "transaction_pattern" }, "required": true },
+        "tax_code": { "type": { "ref": "tax_code" }, "required": true },
+        "pc_code": { "type": "string", "required": false },
+        "cc_code": { "type": "string", "required": false },
+        "project_code": { "type": "string", "required": false },
+        "description": { "type": "string", "required": false },
+        "status": {
+          "type": { "enum": ["DRAFT", "PENDING", "PROCESSED", "CANCELLED"] },
+          "required": true
+        },
+        "journal_id": { "type": { "ref": "journal_header" }, "required": false }
+      }
+    }
+  },
+  "derived": {
+    "journal_balance_check": {
+      "entity": "journal_header",
+      "description": "仕訳の貸借バランスチェック",
+      "returns": "bool",
+      "formula": {
+        "type": "binary",
+        "op": "eq",
+        "left": { "type": "self", "field": "total_debit" },
+        "right": { "type": "self", "field": "total_credit" }
+      }
+    },
+    "journal_line_debit_sum": {
+      "entity": "journal_header",
+      "description": "仕訳明細借方合計",
+      "returns": "int",
+      "formula": {
+        "type": "agg",
+        "op": "sum",
+        "from": "journal_line",
+        "as": "line",
+        "expr": { "type": "ref", "path": "line.debit_amount" },
+        "where": {
+          "type": "binary",
+          "op": "eq",
+          "left": { "type": "ref", "path": "line.journal_id" },
+          "right": { "type": "self", "field": "journal_id" }
+        }
+      }
+    },
+    "journal_line_credit_sum": {
+      "entity": "journal_header",
+      "description": "仕訳明細貸方合計",
+      "returns": "int",
+      "formula": {
+        "type": "agg",
+        "op": "sum",
+        "from": "journal_line",
+        "as": "line",
+        "expr": { "type": "ref", "path": "line.credit_amount" },
+        "where": {
+          "type": "binary",
+          "op": "eq",
+          "left": { "type": "ref", "path": "line.journal_id" },
+          "right": { "type": "self", "field": "journal_id" }
+        }
+      }
+    },
+    "account_balance": {
+      "entity": "account",
+      "description": "勘定科目残高（借方 - 貸方）",
+      "returns": "int",
+      "formula": {
+        "type": "binary",
+        "op": "sub",
+        "left": {
+          "type": "agg",
+          "op": "sum",
+          "from": "journal_line",
+          "as": "line",
+          "expr": { "type": "ref", "path": "line.debit_amount" },
+          "where": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "line.account_code" },
+            "right": { "type": "self", "field": "account_code" }
+          }
+        },
+        "right": {
+          "type": "agg",
+          "op": "sum",
+          "from": "journal_line",
+          "as": "line",
+          "expr": { "type": "ref", "path": "line.credit_amount" },
+          "where": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "line.account_code" },
+            "right": { "type": "self", "field": "account_code" }
+          }
+        }
+      }
+    },
+    "tax_deductible_amount": {
+      "entity": "journal_line",
+      "description": "控除可能税額（インボイス制度対応）",
+      "returns": "int",
+      "formula": {
+        "type": "if",
+        "cond": {
+          "type": "binary",
+          "op": "ne",
+          "left": { "type": "self", "field": "tax_code" },
+          "right": { "type": "literal", "value": null }
+        },
+        "then": {
+          "type": "binary",
+          "op": "mul",
+          "left": { "type": "self", "field": "tax_amount" },
+          "right": { "type": "literal", "value": 1.0 }
+        },
+        "else": { "type": "literal", "value": 0 }
+      }
+    }
+  },
+  "functions": {
+    "generate_journal_from_voucher": {
+      "description": "伝票から仕訳を自動生成",
+      "implements": ["REQ-GL-002"],
+      "input": {
+        "voucher_id": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "voucher.status" },
+            "right": { "type": "literal", "value": "PENDING" }
+          },
+          "entity": "voucher",
+          "reason": "PENDING状態の伝票のみ仕訳生成可能"
+        }
+      ],
+      "error": [
+        {
+          "code": "VOUCHER_NOT_PENDING",
+          "when": {
+            "type": "binary",
+            "op": "ne",
+            "left": { "type": "ref", "path": "voucher.status" },
+            "right": { "type": "literal", "value": "PENDING" }
+          },
+          "reason": "伝票がPENDING状態ではない",
+          "http_status": 409
+        },
+        {
+          "code": "INVALID_PATTERN",
+          "when": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "transaction_pattern.is_active" },
+            "right": { "type": "literal", "value": false }
+          },
+          "reason": "取引パターンが無効",
+          "http_status": 400
+        },
+        {
+          "code": "INVALID_TAX_CODE",
+          "when": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "tax_code.tax_code" },
+            "right": { "type": "literal", "value": null }
+          },
+          "reason": "税コードが無効",
+          "http_status": 400
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "create": "journal_header",
+            "with": {
+              "journal_date": { "type": "ref", "path": "voucher.voucher_date" },
+              "posting_date": { "type": "date", "op": "today" },
+              "journal_type": { "type": "literal", "value": "NORMAL" },
+              "source_module": { "type": "ref", "path": "transaction_pattern.source_module" },
+              "source_doc_type": { "type": "ref", "path": "voucher.voucher_type" },
+              "source_doc_id": { "type": "input", "name": "voucher_id" },
+              "currency_code": { "type": "ref", "path": "voucher.currency_code" },
+              "exchange_rate": { "type": "ref", "path": "voucher.exchange_rate" },
+              "total_debit": { "type": "ref", "path": "voucher.gross_amount" },
+              "total_credit": { "type": "ref", "path": "voucher.gross_amount" },
+              "status": {
+                "type": "if",
+                "cond": { "type": "ref", "path": "transaction_pattern.auto_post" },
+                "then": { "type": "literal", "value": "POSTED" },
+                "else": { "type": "literal", "value": "PENDING" }
+              }
+            }
+          },
+          "reason": "仕訳ヘッダ作成"
+        },
+        {
+          "action": {
+            "create": "journal_line",
+            "with": {
+              "line_number": { "type": "literal", "value": 1 },
+              "account_code": { "type": "ref", "path": "transaction_pattern.debit_account_code" },
+              "debit_amount": { "type": "ref", "path": "voucher.gross_amount" },
+              "credit_amount": { "type": "literal", "value": 0 },
+              "tax_code": { "type": "ref", "path": "voucher.tax_code" },
+              "tax_amount": { "type": "ref", "path": "voucher.tax_amount" },
+              "tax_base_amount": { "type": "ref", "path": "voucher.net_amount" },
+              "pc_code": { "type": "ref", "path": "voucher.pc_code" },
+              "cc_code": { "type": "ref", "path": "voucher.cc_code" },
+              "project_code": { "type": "ref", "path": "voucher.project_code" },
+              "partner_type": { "type": "ref", "path": "voucher.partner_type" },
+              "partner_code": { "type": "ref", "path": "voucher.partner_code" }
+            }
+          },
+          "reason": "借方明細作成"
+        },
+        {
+          "action": {
+            "create": "journal_line",
+            "with": {
+              "line_number": { "type": "literal", "value": 2 },
+              "account_code": { "type": "ref", "path": "transaction_pattern.credit_account_code" },
+              "debit_amount": { "type": "literal", "value": 0 },
+              "credit_amount": { "type": "ref", "path": "voucher.gross_amount" },
+              "pc_code": { "type": "ref", "path": "voucher.pc_code" },
+              "cc_code": { "type": "ref", "path": "voucher.cc_code" },
+              "project_code": { "type": "ref", "path": "voucher.project_code" },
+              "partner_type": { "type": "ref", "path": "voucher.partner_type" },
+              "partner_code": { "type": "ref", "path": "voucher.partner_code" }
+            }
+          },
+          "reason": "貸方明細作成"
+        },
+        {
+          "action": {
+            "update": "voucher",
+            "set": {
+              "status": { "type": "literal", "value": "PROCESSED" }
+            }
+          },
+          "reason": "伝票ステータスを処理済みに更新"
+        }
+      ]
+    },
+    "approve_journal": {
+      "description": "仕訳の承認",
+      "implements": ["REQ-GL-003"],
+      "input": {
+        "journal_id": { "type": "string", "required": true },
+        "approver_id": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "journal_header.status" },
+            "right": { "type": "literal", "value": "PENDING" }
+          },
+          "entity": "journal_header",
+          "reason": "PENDING状態の仕訳のみ承認可能"
+        }
+      ],
+      "error": [
+        {
+          "code": "JOURNAL_NOT_PENDING",
+          "when": {
+            "type": "binary",
+            "op": "ne",
+            "left": { "type": "ref", "path": "journal_header.status" },
+            "right": { "type": "literal", "value": "PENDING" }
+          },
+          "reason": "仕訳がPENDING状態ではない",
+          "http_status": 409
+        },
+        {
+          "code": "BALANCE_MISMATCH",
+          "when": {
+            "type": "binary",
+            "op": "ne",
+            "left": { "type": "ref", "path": "journal_header.total_debit" },
+            "right": { "type": "ref", "path": "journal_header.total_credit" }
+          },
+          "reason": "貸借バランスが不一致",
+          "http_status": 400
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "journal_header",
+            "set": {
+              "status": { "type": "literal", "value": "APPROVED" },
+              "approved_by": { "type": "input", "name": "approver_id" }
+            }
+          },
+          "reason": "仕訳を承認済みに更新"
+        }
+      ]
+    },
+    "post_journal": {
+      "description": "仕訳の転記",
+      "implements": ["REQ-GL-001"],
+      "input": {
+        "journal_id": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "journal_header.status" },
+            "right": { "type": "literal", "value": "APPROVED" }
+          },
+          "entity": "journal_header",
+          "reason": "承認済み仕訳のみ転記可能"
+        }
+      ],
+      "error": [
+        {
+          "code": "JOURNAL_NOT_APPROVED",
+          "when": {
+            "type": "binary",
+            "op": "ne",
+            "left": { "type": "ref", "path": "journal_header.status" },
+            "right": { "type": "literal", "value": "APPROVED" }
+          },
+          "reason": "仕訳が承認済みではない",
+          "http_status": 409
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "update": "journal_header",
+            "set": {
+              "status": { "type": "literal", "value": "POSTED" },
+              "posted_at": { "type": "date", "op": "now" }
+            }
+          },
+          "reason": "仕訳を転記済みに更新"
+        }
+      ]
+    },
+    "reverse_journal": {
+      "description": "仕訳の取消（反対仕訳生成）",
+      "implements": ["REQ-GL-003"],
+      "input": {
+        "journal_id": { "type": "string", "required": true },
+        "reason": { "type": "string", "required": true }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "journal_header.status" },
+            "right": { "type": "literal", "value": "POSTED" }
+          },
+          "entity": "journal_header",
+          "reason": "転記済み仕訳のみ取消可能"
+        }
+      ],
+      "error": [
+        {
+          "code": "JOURNAL_NOT_POSTED",
+          "when": {
+            "type": "binary",
+            "op": "ne",
+            "left": { "type": "ref", "path": "journal_header.status" },
+            "right": { "type": "literal", "value": "POSTED" }
+          },
+          "reason": "仕訳が転記済みではない",
+          "http_status": 409
+        }
+      ],
+      "post": [
+        {
+          "action": {
+            "create": "journal_header",
+            "with": {
+              "journal_date": { "type": "date", "op": "today" },
+              "posting_date": { "type": "date", "op": "today" },
+              "journal_type": { "type": "literal", "value": "REVERSAL" },
+              "source_module": { "type": "ref", "path": "journal_header.source_module" },
+              "source_doc_type": { "type": "literal", "value": "REVERSAL" },
+              "source_doc_id": { "type": "input", "name": "journal_id" },
+              "description": { "type": "input", "name": "reason" },
+              "currency_code": { "type": "ref", "path": "journal_header.currency_code" },
+              "exchange_rate": { "type": "ref", "path": "journal_header.exchange_rate" },
+              "total_debit": { "type": "ref", "path": "journal_header.total_credit" },
+              "total_credit": { "type": "ref", "path": "journal_header.total_debit" },
+              "status": { "type": "literal", "value": "POSTED" }
+            }
+          },
+          "reason": "反対仕訳を作成"
+        },
+        {
+          "action": {
+            "update": "journal_header",
+            "set": {
+              "status": { "type": "literal", "value": "CANCELLED" }
+            }
+          },
+          "reason": "元仕訳を取消済みに更新"
+        }
+      ]
+    }
+  },
+  "scenarios": {
+    "GL-001": {
+      "title": "売上伝票から仕訳を自動生成（税込処理）",
+      "verifies": ["REQ-GL-002"],
+      "given": {
+        "account": [
+          {
+            "account_code": "1310",
+            "account_name": "売掛金",
+            "account_type": "BS_ASSET",
+            "account_category": "AR",
+            "tax_applicable": false,
+            "currency_code": "JPY",
+            "is_active": true
+          },
+          {
+            "account_code": "4110",
+            "account_name": "売上高",
+            "account_type": "PL_REVENUE",
+            "account_category": "REVENUE",
+            "tax_applicable": true,
+            "currency_code": "JPY",
+            "is_active": true
+          }
+        ],
+        "tax_code": {
+          "tax_code": "S10",
+          "tax_name": "課税売上10%",
+          "tax_rate": 0.10,
+          "tax_type": "SALES",
+          "invoice_type": "QUALIFIED",
+          "deductible_rate": 1.0,
+          "effective_from": "2023-10-01T00:00:00Z"
+        },
+        "transaction_pattern": {
+          "pattern_code": "SALES-TM",
+          "pattern_name": "T&M売上計上",
+          "pattern_category": "SALES",
+          "source_module": "AR",
+          "debit_account_code": "1310",
+          "credit_account_code": "4110",
+          "tax_handling": "INCLUSIVE",
+          "auto_post": false,
+          "is_active": true
+        },
+        "voucher": {
+          "voucher_id": "VCH-001",
+          "voucher_type": "SALES_INVOICE",
+          "voucher_date": "2026-01-15T00:00:00Z",
+          "partner_type": "CUSTOMER",
+          "partner_code": "CUST-001",
+          "currency_code": "JPY",
+          "exchange_rate": 1.0,
+          "gross_amount": 1100000,
+          "tax_amount": 100000,
+          "net_amount": 1000000,
+          "pattern_code": "SALES-TM",
+          "tax_code": "S10",
+          "pc_code": "PC01",
+          "project_code": "PRJ-001",
+          "status": "PENDING"
+        },
+        "journal_header": [],
+        "journal_line": []
+      },
+      "when": {
+        "call": "generate_journal_from_voucher",
+        "input": {
+          "voucher_id": "VCH-001"
+        }
+      },
+      "then": {
+        "success": true,
+        "assert": [
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "voucher.status" },
+            "right": { "type": "literal", "value": "PROCESSED" }
+          },
+          {
+            "type": "exists",
+            "from": "journal_header",
+            "where": {
+              "type": "binary",
+              "op": "eq",
+              "left": { "type": "ref", "path": "journal_header.source_doc_id" },
+              "right": { "type": "literal", "value": "VCH-001" }
+            }
+          }
+        ]
+      }
+    },
+    "GL-002": {
+      "title": "仕訳の承認と転記",
+      "verifies": ["REQ-GL-003"],
+      "given": {
+        "journal_header": {
+          "journal_id": "JNL-001",
+          "journal_number": "JNL-2026-00001",
+          "journal_date": "2026-01-15T00:00:00Z",
+          "posting_date": "2026-01-15T00:00:00Z",
+          "fiscal_year": 2026,
+          "fiscal_period": 1,
+          "journal_type": "NORMAL",
+          "source_module": "AR",
+          "currency_code": "JPY",
+          "exchange_rate": 1.0,
+          "total_debit": 1100000,
+          "total_credit": 1100000,
+          "status": "PENDING",
+          "created_by": "user001"
+        },
+        "journal_line": [
+          {
+            "line_id": "LINE-001",
+            "journal_id": "JNL-001",
+            "line_number": 1,
+            "account_code": "1310",
+            "debit_amount": 1100000,
+            "credit_amount": 0
+          },
+          {
+            "line_id": "LINE-002",
+            "journal_id": "JNL-001",
+            "line_number": 2,
+            "account_code": "4110",
+            "debit_amount": 0,
+            "credit_amount": 1100000
+          }
+        ]
+      },
+      "when": {
+        "call": "approve_journal",
+        "input": {
+          "journal_id": "JNL-001",
+          "approver_id": "manager001"
+        }
+      },
+      "then": {
+        "success": true,
+        "assert": [
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "journal_header.status" },
+            "right": { "type": "literal", "value": "APPROVED" }
+          },
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "journal_header.approved_by" },
+            "right": { "type": "literal", "value": "manager001" }
+          }
+        ]
+      }
+    },
+    "GL-003": {
+      "title": "貸借不一致の仕訳は承認エラー",
+      "verifies": ["REQ-GL-001"],
+      "given": {
+        "journal_header": {
+          "journal_id": "JNL-002",
+          "journal_number": "JNL-2026-00002",
+          "journal_date": "2026-01-15T00:00:00Z",
+          "posting_date": "2026-01-15T00:00:00Z",
+          "fiscal_year": 2026,
+          "fiscal_period": 1,
+          "journal_type": "NORMAL",
+          "source_module": "GL",
+          "currency_code": "JPY",
+          "exchange_rate": 1.0,
+          "total_debit": 1100000,
+          "total_credit": 1000000,
+          "status": "PENDING",
+          "created_by": "user001"
+        }
+      },
+      "when": {
+        "call": "approve_journal",
+        "input": {
+          "journal_id": "JNL-002",
+          "approver_id": "manager001"
+        }
+      },
+      "then": {
+        "success": false,
+        "error": "BALANCE_MISMATCH"
+      }
+    },
+    "GL-004": {
+      "title": "転記済み仕訳の取消（反対仕訳生成）",
+      "verifies": ["REQ-GL-003"],
+      "given": {
+        "journal_header": {
+          "journal_id": "JNL-003",
+          "journal_number": "JNL-2026-00003",
+          "journal_date": "2026-01-10T00:00:00Z",
+          "posting_date": "2026-01-10T00:00:00Z",
+          "fiscal_year": 2026,
+          "fiscal_period": 1,
+          "journal_type": "NORMAL",
+          "source_module": "AR",
+          "currency_code": "JPY",
+          "exchange_rate": 1.0,
+          "total_debit": 550000,
+          "total_credit": 550000,
+          "status": "POSTED",
+          "created_by": "user001",
+          "approved_by": "manager001",
+          "posted_at": "2026-01-10T10:00:00Z"
+        }
+      },
+      "when": {
+        "call": "reverse_journal",
+        "input": {
+          "journal_id": "JNL-003",
+          "reason": "誤計上のため取消"
+        }
+      },
+      "then": {
+        "success": true,
+        "assert": [
+          {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "ref", "path": "journal_header.status" },
+            "right": { "type": "literal", "value": "CANCELLED" }
+          },
+          {
+            "type": "exists",
+            "from": "journal_header",
+            "where": {
+              "type": "binary",
+              "op": "and",
+              "left": {
+                "type": "binary",
+                "op": "eq",
+                "left": { "type": "ref", "path": "journal_header.journal_type" },
+                "right": { "type": "literal", "value": "REVERSAL" }
+              },
+              "right": {
+                "type": "binary",
+                "op": "eq",
+                "left": { "type": "ref", "path": "journal_header.source_doc_id" },
+                "right": { "type": "literal", "value": "JNL-003" }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "invariants": [
+    {
+      "id": "INV-GL-001",
+      "entity": "journal_header",
+      "expr": {
+        "type": "binary",
+        "op": "eq",
+        "left": { "type": "self", "field": "total_debit" },
+        "right": { "type": "self", "field": "total_credit" }
+      },
+      "description": "仕訳の借方・貸方は必ず一致（貸借バランス）"
+    },
+    {
+      "id": "INV-GL-002",
+      "entity": "journal_line",
+      "expr": {
+        "type": "binary",
+        "op": "or",
+        "left": {
+          "type": "binary",
+          "op": "and",
+          "left": {
+            "type": "binary",
+            "op": "gt",
+            "left": { "type": "self", "field": "debit_amount" },
+            "right": { "type": "literal", "value": 0 }
+          },
+          "right": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "self", "field": "credit_amount" },
+            "right": { "type": "literal", "value": 0 }
+          }
+        },
+        "right": {
+          "type": "binary",
+          "op": "and",
+          "left": {
+            "type": "binary",
+            "op": "eq",
+            "left": { "type": "self", "field": "debit_amount" },
+            "right": { "type": "literal", "value": 0 }
+          },
+          "right": {
+            "type": "binary",
+            "op": "gt",
+            "left": { "type": "self", "field": "credit_amount" },
+            "right": { "type": "literal", "value": 0 }
+          }
+        }
+      },
+      "description": "仕訳明細は借方または貸方のいずれか一方のみに金額を持つ"
+    },
+    {
+      "id": "INV-GL-003",
+      "entity": "tax_code",
+      "expr": {
+        "type": "binary",
+        "op": "and",
+        "left": {
+          "type": "binary",
+          "op": "ge",
+          "left": { "type": "self", "field": "deductible_rate" },
+          "right": { "type": "literal", "value": 0 }
+        },
+        "right": {
+          "type": "binary",
+          "op": "le",
+          "left": { "type": "self", "field": "deductible_rate" },
+          "right": { "type": "literal", "value": 1 }
+        }
+      },
+      "description": "控除率は0〜1の範囲"
+    },
+    {
+      "id": "INV-GL-004",
+      "entity": "voucher",
+      "expr": {
+        "type": "binary",
+        "op": "eq",
+        "left": { "type": "self", "field": "gross_amount" },
+        "right": {
+          "type": "binary",
+          "op": "add",
+          "left": { "type": "self", "field": "net_amount" },
+          "right": { "type": "self", "field": "tax_amount" }
+        }
+      },
+      "description": "伝票の総額 = 本体額 + 税額"
+    }
+  ]
+}
