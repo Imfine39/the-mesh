@@ -1,11 +1,3 @@
 {
-  "mcpServers": {
-    "the_mesh": {
-      "command": "/home/nick/projects/the-mesh/.venv/bin/python",
-      "args": ["-m", "the_mesh.mcp.server"],
-      "env": {
-        "PYTHONPATH": "/home/nick/projects/the-mesh/src"
-      }
-    }
-  }
+  "mcpServers": {}
 }
