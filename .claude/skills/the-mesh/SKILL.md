@@ -7,6 +7,29 @@ description: "Specification-driven development framework using TRIR (Typed Relat
 
 TRIR (Typed Relational IR) specification framework for test-driven, spec-first development.
 
+## Directory Structure
+
+This skill is self-contained and portable across projects:
+
+```
+.claude/skills/the-mesh/
+├── SKILL.md              # This file
+├── scripts/              # CLI entry points
+│   ├── mesh_validate.py
+│   ├── mesh_generate.py
+│   ├── mesh_spec.py
+│   └── mesh_task.py
+├── lib/                  # Core library
+│   ├── core/             # Validator, handlers, storage
+│   ├── generators/       # Test & type generators
+│   │   ├── python/       # pytest generators
+│   │   └── typescript/   # jest generators
+│   ├── graph/            # Dependency analysis
+│   ├── config/           # Project config
+│   └── schemas/          # JSON Schema definitions
+└── tests/                # Unit tests
+```
+
 ## Quick Commands
 
 CLI scripts are available at `.claude/skills/the-mesh/scripts/`:

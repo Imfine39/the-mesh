@@ -16,10 +16,11 @@ import sys
 import json
 import argparse
 
+# Add lib directory to path
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
-from the_mesh.core.storage.spec_storage import SpecStorage
+from core.storage.spec_storage import SpecStorage
 
 
 def main():

@@ -23,11 +23,12 @@ import sys
 import json
 import argparse
 
+# Add lib directory to path
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 
-from the_mesh.core.validator import MeshValidator
-from the_mesh.core.storage.spec_storage import SpecStorage
+from core.validator import MeshValidator
+from core.storage.spec_storage import SpecStorage
 
 
 def main():
@@ -65,16 +66,16 @@ def main():
     if args.type == "tests":
         output = generate_tests(spec, args.framework, args.function)
     elif args.type == "typescript":
-        from the_mesh.generators.typescript_gen import TypeScriptGenerator
+        from generators.typescript_gen import TypeScriptGenerator
         gen = TypeScriptGenerator(spec)
         output = gen.generate_all()
     elif args.type == "openapi":
-        from the_mesh.generators.openapi_gen import OpenAPIGenerator
+        from generators.openapi_gen import OpenAPIGenerator
         gen = OpenAPIGenerator(spec)
         schema = gen.generate()
         output = json.dumps(schema, indent=2)
     elif args.type == "zod":
-        from the_mesh.generators.zod_gen import ZodGenerator
+        from generators.zod_gen import ZodGenerator
         gen = ZodGenerator(spec)
         output = gen.generate_all()
     elif args.type == "task-package":
@@ -99,44 +100,44 @@ def generate_tests(spec: dict, framework: str, function_name: str | None) -> str
 
     if lang == "pytest":
         if test_type == "ut":
-            from the_mesh.generators.python.pytest_unit_gen import PytestUnitGenerator
+            from generators.python.pytest_unit_gen import PytestUnitGenerator
             gen = PytestUnitGenerator(spec)
             return gen.generate_all()
         elif test_type == "at":
-            from the_mesh.generators.python.pytest_gen import PytestGenerator
+            from generators.python.pytest_gen import PytestGenerator
             gen = PytestGenerator(spec)
             if function_name:
                 return gen.generate_for_function(function_name)
             return gen.generate_all()
         elif test_type == "pc":
-            from the_mesh.generators.python.postcondition_gen import PostConditionGenerator
+            from generators.python.postcondition_gen import PostConditionGenerator
             gen = PostConditionGenerator(spec)
             if function_name:
                 return gen.generate_for_function(function_name)
             return gen.generate_all()
         elif test_type == "st":
-            from the_mesh.generators.python.state_transition_gen import StateTransitionGenerator
+            from generators.python.state_transition_gen import StateTransitionGenerator
             gen = StateTransitionGenerator(spec)
             return gen.generate_all()
     elif lang == "jest":
         if test_type == "ut":
-            from the_mesh.generators.typescript.jest_unit_gen import JestUnitGenerator
+            from generators.typescript.jest_unit_gen import JestUnitGenerator
             gen = JestUnitGenerator(spec)
             return gen.generate_all()
         elif test_type == "at":
-            from the_mesh.generators.typescript.jest_gen import JestGenerator
+            from generators.typescript.jest_gen import JestGenerator
             gen = JestGenerator(spec)
             if function_name:
                 return gen.generate_for_function(function_name)
             return gen.generate_all()
         elif test_type == "pc":
-            from the_mesh.generators.typescript.jest_postcondition_gen import JestPostConditionGenerator
+            from generators.typescript.jest_postcondition_gen import JestPostConditionGenerator
             gen = JestPostConditionGenerator(spec)
             if function_name:
                 return gen.generate_for_function(function_name)
             return gen.generate_all()
         elif test_type == "st":
-            from the_mesh.generators.typescript.jest_state_transition_gen import JestStateTransitionGenerator
+            from generators.typescript.jest_state_transition_gen import JestStateTransitionGenerator
             gen = JestStateTransitionGenerator(spec)
             return gen.generate_all()
 
@@ -145,7 +146,7 @@ def generate_tests(spec: dict, framework: str, function_name: str | None) -> str
 
 def generate_task_package(spec: dict, function_name: str) -> str:
     """Generate task implementation package"""
-    from the_mesh.generators.task_package_gen import TaskPackageGenerator
+    from generators.task_package_gen import TaskPackageGenerator
 
     gen = TaskPackageGenerator(spec)
     if function_name == "all":

@@ -16,32 +16,47 @@ source .venv/bin/activate
 ### Common Commands
 ```bash
 # Run all tests
-python -m pytest tests/ -v
+python -m pytest .claude/skills/the-mesh/tests/ -v
 
 # Run specific test file
-python -m pytest tests/test_validator.py -v
+python -m pytest .claude/skills/the-mesh/tests/test_validator.py -v
 
 # Run specific test class
-python -m pytest tests/test_validator.py::TestBasicValidation -v
+python -m pytest .claude/skills/the-mesh/tests/test_validator.py::TestBasicValidation -v
 
 # Run with coverage
-python -m pytest tests/ --cov=src --cov-report=html
+python -m pytest .claude/skills/the-mesh/tests/ --cov=.claude/skills/the-mesh/lib --cov-report=html
 
 # Lint
-python -m ruff check src/
+python -m ruff check .claude/skills/the-mesh/lib/
+```
+
+### CLI Scripts
+```bash
+# Validate spec
+python .claude/skills/the-mesh/scripts/mesh_validate.py PROJECT_NAME
+
+# Generate tests
+python .claude/skills/the-mesh/scripts/mesh_generate.py PROJECT_NAME --type tests --framework pytest-ut
+
+# Manage specs
+python .claude/skills/the-mesh/scripts/mesh_spec.py list
+
+# Task management
+python .claude/skills/the-mesh/scripts/mesh_task.py status
 ```
 
 ### Test Files by Feature
 | Feature | Test File |
 |---------|-----------|
-| Core Validation | `tests/test_validator.py` |
-| TypeScript Generation | `tests/test_typescript_gen.py` |
-| OpenAPI Generation | `tests/test_openapi_gen.py` |
-| Zod Generation | `tests/test_zod_gen.py` |
-| Jest Generation | `tests/test_jest_gen.py` |
-| Frontend Validation | `tests/test_frontend_validation.py` |
-| Task Manager | `tests/test_task_manager.py` |
-| Dependency Graph | `tests/test_graph.py` |
+| Core Validation | `.claude/skills/the-mesh/tests/test_validator.py` |
+| TypeScript Generation | `.claude/skills/the-mesh/tests/test_typescript_gen.py` |
+| OpenAPI Generation | `.claude/skills/the-mesh/tests/test_openapi_gen.py` |
+| Zod Generation | `.claude/skills/the-mesh/tests/test_zod_gen.py` |
+| Jest Generation | `.claude/skills/the-mesh/tests/test_jest_gen.py` |
+| Frontend Validation | `.claude/skills/the-mesh/tests/test_frontend_validation.py` |
+| Task Manager | `.claude/skills/the-mesh/tests/test_task_manager.py` |
+| Dependency Graph | `.claude/skills/the-mesh/tests/test_graph.py` |
 
 ---
 
@@ -60,43 +75,40 @@ The Mesh is a specification-driven development framework integrated with Claude 
 ## Project Structure
 
 ```
-src/the_mesh/
-├── core/                    # Core functionality
-│   ├── validator.py         # Main validator (2500+ lines)
-│   ├── errors.py            # Error types
-│   ├── storage/             # Spec storage
-│   │   └── spec_storage.py
-│   ├── task/                # Task management
-│   │   └── task_manager.py
-│   ├── handlers/            # Tool implementations (38 handlers)
-│   │   ├── validation.py    # 10 handlers
-│   │   ├── spec_crud.py     # 10 handlers
-│   │   ├── generation.py    # 4 handlers
-│   │   ├── task.py          # 6 handlers
-│   │   ├── project.py       # 2 handlers
-│   │   └── frontend.py      # 6 handlers
-│   └── domain/              # Domain validation mixins
-├── graph/                   # Dependency analysis
-│   └── graph.py             # DependencyGraph
-├── generators/              # Code generators (15 generators)
-│   ├── typescript_gen.py    # TypeScript interfaces
-│   ├── openapi_gen.py       # OpenAPI 3.1 schemas
-│   ├── zod_gen.py           # Zod validators
-│   ├── pytest_gen.py        # Pytest AT (acceptance tests)
-│   ├── pytest_unit_gen.py   # Pytest UT (unit tests)
-│   ├── postcondition_gen.py # Pytest PC (postcondition tests)
-│   ├── state_transition_gen.py # Pytest ST (state transition tests)
-│   ├── jest_gen.py          # Jest AT
-│   ├── jest_unit_gen.py     # Jest UT
-│   ├── jest_postcondition_gen.py # Jest PC
-│   ├── jest_state_transition_gen.py # Jest ST
-│   ├── human_readable_gen.py # ER diagrams, Mermaid, Markdown
-│   ├── yaml_gen.py          # YAML export
-│   └── task_package_gen.py  # Implementation packages
-├── config/                  # Project configuration
-├── hooks/                   # Git integration
-└── schemas/                 # JSON Schema definitions
-    └── mesh.schema.json     # Main spec schema
+.claude/skills/the-mesh/           # Self-contained skill (portable)
+├── SKILL.md                       # Skill definition
+├── scripts/                       # CLI entry points
+│   ├── mesh_validate.py
+│   ├── mesh_generate.py
+│   ├── mesh_spec.py
+│   └── mesh_task.py
+├── lib/                           # Core library
+│   ├── core/                      # Core functionality
+│   │   ├── validator.py           # Main validator (2500+ lines)
+│   │   ├── errors.py              # Error types
+│   │   ├── storage/               # Spec storage
+│   │   ├── task/                  # Task management
+│   │   ├── handlers/              # Tool implementations (38 handlers)
+│   │   └── domain/                # Domain validation mixins
+│   ├── graph/                     # Dependency analysis
+│   │   └── graph.py               # DependencyGraph
+│   ├── generators/                # Code generators
+│   │   ├── python/                # pytest generators (AT/UT/PC/ST)
+│   │   ├── typescript/            # jest generators (AT/UT/PC/ST)
+│   │   ├── typescript_gen.py      # TypeScript interfaces
+│   │   ├── openapi_gen.py         # OpenAPI 3.1 schemas
+│   │   ├── zod_gen.py             # Zod validators
+│   │   └── task_package_gen.py    # Implementation packages
+│   ├── config/                    # Project configuration
+│   └── schemas/                   # JSON Schema definitions
+│       └── mesh.schema.json       # Main spec schema
+└── tests/                         # Unit tests
+
+.claude/skills/the-mosaic/         # Requirements definition skill (WIP)
+├── SKILL.md
+└── docs/
+    ├── IDEAS.md                   # Design concepts
+    └── MOCK_FORMAT.md             # Mock HTML format spec
 ```
 
 ---
@@ -104,21 +116,22 @@ src/the_mesh/
 ## Key Files
 
 ### Validation
-- `src/the_mesh/core/validator.py` - Main validation logic
+- `.claude/skills/the-mesh/lib/core/validator.py` - Main validation logic
   - `validate()` method runs all validation phases
   - Error codes: SCH-xxx, REF-xxx, TYP-xxx, VAL-xxx, FSM-xxx, CNS-xxx, FE-xxx
 
 ### Handlers
-- `src/the_mesh/core/handlers/__init__.py` - Handler registry (38 handlers)
+- `.claude/skills/the-mesh/lib/core/handlers/__init__.py` - Handler registry (38 handlers)
 
 ### Generators
-- TypeScript: `src/the_mesh/generators/typescript_gen.py`
-- OpenAPI: `src/the_mesh/generators/openapi_gen.py`
-- Zod: `src/the_mesh/generators/zod_gen.py`
-- Tests: `pytest_gen.py`, `postcondition_gen.py`, `state_transition_gen.py`, etc.
+- TypeScript: `.claude/skills/the-mesh/lib/generators/typescript_gen.py`
+- OpenAPI: `.claude/skills/the-mesh/lib/generators/openapi_gen.py`
+- Zod: `.claude/skills/the-mesh/lib/generators/zod_gen.py`
+- Pytest: `.claude/skills/the-mesh/lib/generators/python/`
+- Jest: `.claude/skills/the-mesh/lib/generators/typescript/`
 
 ### Schema
-- `src/the_mesh/schemas/mesh.schema.json` - TRIR JSON Schema
+- `.claude/skills/the-mesh/lib/schemas/mesh.schema.json` - TRIR JSON Schema
 
 ---
 
@@ -156,8 +169,8 @@ src/the_mesh/
 
 ### Framework Options
 ```
-pytest, pytest-ut, pytest-postcondition, pytest-state
-jest, jest-ts, jest-ut, jest-ts-ut, jest-postcondition, jest-ts-postcondition, jest-state, jest-ts-state
+pytest-ut, pytest-at, pytest-pc, pytest-st
+jest-ut, jest-at, jest-pc, jest-st
 ```
 
 ---
@@ -199,7 +212,7 @@ Binary operators: `add`, `sub`, `mul`, `div`, `eq`, `ne`, `lt`, `le`, `gt`, `ge`
 
 ## Development Workflow
 
-1. **Make changes** to source files
-2. **Run relevant tests**: `python -m pytest tests/test_<feature>.py -v`
-3. **Run all tests**: `python -m pytest tests/ -v`
-4. **Check lint**: `python -m ruff check src/`
+1. **Make changes** to source files in `.claude/skills/the-mesh/lib/`
+2. **Run relevant tests**: `python -m pytest .claude/skills/the-mesh/tests/test_<feature>.py -v`
+3. **Run all tests**: `python -m pytest .claude/skills/the-mesh/tests/ -v`
+4. **Check lint**: `python -m ruff check .claude/skills/the-mesh/lib/`
