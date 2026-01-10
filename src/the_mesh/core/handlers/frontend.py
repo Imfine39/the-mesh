@@ -304,10 +304,140 @@ def generate_all_frontend(validator: MeshValidator, storage: SpecStorage, args: 
     }
 
 
+def export_human_readable(validator: MeshValidator, storage: SpecStorage, args: dict) -> dict:
+    """Export specification to human-readable formats (Mermaid diagrams, Markdown tables).
+
+    Args:
+        spec, spec_path, or spec_id: Specification source
+        format: Output format - 'all', 'er', 'state', 'flow', 'entities', 'functions', 'scenarios'
+        output_path: Optional - write output to file
+
+    Returns:
+        Generated human-readable content
+    """
+    from the_mesh.generators.human_readable_gen import HumanReadableGenerator
+
+    # Load spec
+    spec = _load_spec_from_args(storage, args)
+    if spec is None:
+        if args.get("spec_id"):
+            return {"error": f"Spec not found: {args['spec_id']}"}
+        return {"error": "One of spec, spec_path, or spec_id is required"}
+
+    output_format = args.get("format", "all")
+    output_path = args.get("output_path")
+
+    generator = HumanReadableGenerator(spec)
+
+    if output_format == "all":
+        result = generator.generate_all()
+        content = {
+            "er_diagram": result.er_diagram,
+            "state_diagrams": result.state_diagrams,
+            "flowcharts": result.flowcharts,
+            "entity_tables": result.entity_tables,
+            "field_tables": result.field_tables,
+            "requirements_text": result.requirements_text,
+            "derived_explanations": result.derived_explanations,
+            "function_explanations": result.function_explanations,
+            "scenario_table": result.scenario_table,
+            "invariant_list": result.invariant_list,
+            "state_machine_diagrams": result.state_machine_diagrams,
+            "saga_diagrams": result.saga_diagrams,
+            "permission_matrix": result.permission_matrix,
+            "event_flow_diagram": result.event_flow_diagram,
+            "role_hierarchy_diagram": result.role_hierarchy_diagram,
+        }
+    elif output_format == "er":
+        content = {"er_diagram": generator.generate_er_diagram()}
+    elif output_format == "state":
+        content = {"state_diagrams": generator.generate_state_diagrams()}
+    elif output_format == "flow":
+        content = {"flowcharts": generator.generate_flowcharts()}
+    elif output_format == "entities":
+        content = {
+            "entity_tables": generator.generate_entity_tables(),
+            "field_tables": generator.generate_field_tables(),
+        }
+    elif output_format == "functions":
+        content = {"function_explanations": generator.generate_function_explanations()}
+    elif output_format == "scenarios":
+        content = {"scenario_table": generator.generate_scenario_table()}
+    else:
+        return {
+            "error": f"Unknown format: {output_format}",
+            "supported_formats": ["all", "er", "state", "flow", "entities", "functions", "scenarios"]
+        }
+
+    # Optionally write to file
+    if output_path:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(content, indent=2, ensure_ascii=False))
+
+    return {
+        "success": True,
+        "format": output_format,
+        "content": content,
+        "output_path": str(output_path) if output_path else None
+    }
+
+
+def export_yaml(validator: MeshValidator, storage: SpecStorage, args: dict) -> dict:
+    """Export specification to YAML format (human-readable view).
+
+    Args:
+        spec, spec_path, or spec_id: Specification source
+        section: Optional - export only specific section
+        output_path: Optional - write output to file
+
+    Returns:
+        Generated YAML content
+    """
+    from the_mesh.generators.yaml_gen import YAMLGenerator
+
+    # Load spec
+    spec = _load_spec_from_args(storage, args)
+    if spec is None:
+        if args.get("spec_id"):
+            return {"error": f"Spec not found: {args['spec_id']}"}
+        return {"error": "One of spec, spec_path, or spec_id is required"}
+
+    section = args.get("section")
+    output_path = args.get("output_path")
+
+    try:
+        generator = YAMLGenerator(spec)
+    except ImportError as e:
+        return {"error": str(e)}
+
+    if section:
+        code = generator.generate_section(section)
+        suggested_filename = f"{section}.yaml"
+    else:
+        code = generator.generate()
+        suggested_filename = "spec.yaml"
+
+    # Optionally write to file
+    if output_path:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(code)
+
+    return {
+        "success": True,
+        "code": code,
+        "suggested_filename": suggested_filename,
+        "output_path": str(output_path) if output_path else None
+    }
+
+
 # Handler registry
 HANDLERS = {
     "generate_typescript_types": generate_typescript_types,
     "generate_openapi": generate_openapi,
     "generate_zod_schemas": generate_zod_schemas,
     "generate_all_frontend": generate_all_frontend,
+    "export_human_readable": export_human_readable,
+    "export_yaml": export_yaml,
 }

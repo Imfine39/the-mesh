@@ -209,10 +209,47 @@ def generate_tests(validator: MeshValidator, storage: SpecStorage, args: dict) -
         file_ext = "ts"
         file_name = "generated.unit.test.ts"
         test_type = "unit"
+    # PostCondition tests - verify create/update/delete side effects
+    elif framework == "pytest-postcondition":
+        generator = PostConditionGenerator(spec)
+        file_ext = "py"
+        file_name = "test_postcondition_generated.py"
+        test_type = "postcondition"
+    elif framework == "jest-postcondition":
+        generator = JestPostConditionGenerator(spec, typescript=False)
+        file_ext = "js"
+        file_name = "generated.postcondition.test.js"
+        test_type = "postcondition"
+    elif framework == "jest-ts-postcondition":
+        generator = JestPostConditionGenerator(spec, typescript=True)
+        file_ext = "ts"
+        file_name = "generated.postcondition.test.ts"
+        test_type = "postcondition"
+    # State transition tests - verify state machine behavior
+    elif framework == "pytest-state":
+        generator = StateTransitionGenerator(spec)
+        file_ext = "py"
+        file_name = "test_state_transition_generated.py"
+        test_type = "state_transition"
+    elif framework == "jest-state":
+        generator = JestStateTransitionGenerator(spec, typescript=False)
+        file_ext = "js"
+        file_name = "generated.state.test.js"
+        test_type = "state_transition"
+    elif framework == "jest-ts-state":
+        generator = JestStateTransitionGenerator(spec, typescript=True)
+        file_ext = "ts"
+        file_name = "generated.state.test.ts"
+        test_type = "state_transition"
     else:
         return {
             "error": f"Unknown framework: {framework}",
-            "supported_frameworks": ["pytest", "pytest-ut", "jest", "jest-ts", "jest-ut", "jest-ts-ut"]
+            "supported_frameworks": [
+                "pytest", "pytest-ut", "pytest-postcondition", "pytest-state",
+                "jest", "jest-ts", "jest-ut", "jest-ts-ut",
+                "jest-postcondition", "jest-ts-postcondition",
+                "jest-state", "jest-ts-state"
+            ]
         }
 
     # Generate tests

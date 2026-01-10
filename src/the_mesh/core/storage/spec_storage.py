@@ -14,7 +14,8 @@ class SpecStorage:
         "meta", "state", "requirements", "derived", "functions", "scenarios",
         "invariants", "stateMachines", "events", "subscriptions", "roles",
         "sagas", "schedules", "gateways", "deadlines", "externalServices",
-        "constraints", "relations", "dataPolicies", "auditPolicies"
+        "constraints", "relations", "dataPolicies", "auditPolicies",
+        "views", "routes"  # Frontend sections
     ]
 
     MINIMAL_TEMPLATE = {
