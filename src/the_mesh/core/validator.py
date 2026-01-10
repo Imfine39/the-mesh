@@ -20,6 +20,10 @@ from the_mesh.core.domain import (
     PolicyValidationMixin,
     MiscValidationMixin,
 )
+from the_mesh.generators.constraint_inference import (
+    infer_preset_from_field_name,
+    PRESETS,
+)
 
 
 # Error code prefixes
@@ -427,6 +431,14 @@ class MeshValidator(
         # 21. Unused function warning (FE-005)
         unused_warnings = self._detect_unused_functions(spec)
         warnings.extend(unused_warnings)
+
+        # 22. Field constraint validation (CNS-001~005)
+        constraint_errors = self._validate_field_constraints(spec)
+        errors.extend(constraint_errors)
+
+        # 23. Constraint inference warnings (CNS-006)
+        inference_warnings = self._generate_constraint_inference_warnings(spec)
+        warnings.extend(inference_warnings)
 
         return ValidationResult(
             valid=len(errors) == 0,
@@ -2075,5 +2087,146 @@ class MeshValidator(
                 category="usage",
                 severity="warning"
             ))
+
+        return warnings
+
+    def _validate_field_constraints(self, spec: dict) -> list[ValidationError]:
+        """
+        Validate field constraints in entity definitions.
+
+        Error codes:
+        - CNS-001: min > max
+        - CNS-002: string type uses min/max instead of minLength/maxLength
+        - CNS-003: Invalid regex pattern
+        - CNS-004: minLength > maxLength
+        - CNS-005: Unknown preset
+        """
+        import re
+        from the_mesh.generators.constraint_inference import PRESETS
+
+        errors = []
+        entities = spec.get("state", {})
+
+        valid_presets = set(PRESETS.keys())
+
+        for entity_name, entity_def in entities.items():
+            fields = entity_def.get("fields", {})
+
+            for field_name, field_def in fields.items():
+                base_path = f"state.{entity_name}.fields.{field_name}"
+                field_type = field_def.get("type")
+
+                # Determine if this is a string type
+                is_string_type = (
+                    field_type == "string" or
+                    field_type == "text" or
+                    (isinstance(field_type, dict) and "enum" in field_type)
+                )
+
+                # CNS-001: min > max
+                if "min" in field_def and "max" in field_def:
+                    if field_def["min"] > field_def["max"]:
+                        errors.append(ValidationError(
+                            path=base_path,
+                            message=f"min ({field_def['min']}) cannot be greater than max ({field_def['max']})",
+                            code="CNS-001",
+                            category="constraint"
+                        ))
+
+                # CNS-002: string type uses min/max
+                if is_string_type:
+                    if "min" in field_def:
+                        errors.append(ValidationError(
+                            path=f"{base_path}.min",
+                            message="Use 'minLength' instead of 'min' for string fields",
+                            code="CNS-002",
+                            category="constraint"
+                        ))
+                    if "max" in field_def:
+                        errors.append(ValidationError(
+                            path=f"{base_path}.max",
+                            message="Use 'maxLength' instead of 'max' for string fields",
+                            code="CNS-002",
+                            category="constraint"
+                        ))
+
+                # CNS-003: Invalid regex pattern
+                if "pattern" in field_def:
+                    try:
+                        re.compile(field_def["pattern"])
+                    except re.error as e:
+                        errors.append(ValidationError(
+                            path=f"{base_path}.pattern",
+                            message=f"Invalid regex pattern: {e}",
+                            code="CNS-003",
+                            category="constraint"
+                        ))
+
+                # CNS-004: minLength > maxLength
+                if "minLength" in field_def and "maxLength" in field_def:
+                    if field_def["minLength"] > field_def["maxLength"]:
+                        errors.append(ValidationError(
+                            path=base_path,
+                            message=f"minLength ({field_def['minLength']}) cannot be greater than maxLength ({field_def['maxLength']})",
+                            code="CNS-004",
+                            category="constraint"
+                        ))
+
+                # CNS-005: Unknown preset
+                if "preset" in field_def:
+                    preset_name = field_def["preset"]
+                    if preset_name not in valid_presets:
+                        errors.append(ValidationError(
+                            path=f"{base_path}.preset",
+                            message=f"Unknown preset '{preset_name}'. Valid presets: {', '.join(sorted(valid_presets))}",
+                            code="CNS-005",
+                            category="constraint"
+                        ))
+
+        return errors
+
+    def _generate_constraint_inference_warnings(self, spec: dict) -> list[ValidationError]:
+        """
+        Generate warnings for fields where constraints are inferred from field names.
+
+        Warning code:
+        - CNS-006: Constraint inferred from field name pattern
+
+        This allows the LLM to review and confirm inferred constraints.
+        """
+        warnings = []
+        entities = spec.get("state", {})
+
+        for entity_name, entity_def in entities.items():
+            fields = entity_def.get("fields", {})
+
+            for field_name, field_def in fields.items():
+                # Skip if preset is explicitly specified
+                if "preset" in field_def:
+                    continue
+
+                # Skip if any explicit constraint is specified
+                explicit_constraints = ["min", "max", "minLength", "maxLength", "pattern", "format"]
+                if any(k in field_def for k in explicit_constraints):
+                    continue
+
+                # Check if field name matches inference rules
+                inferred_preset = infer_preset_from_field_name(field_name)
+                if inferred_preset:
+                    preset_def = PRESETS.get(inferred_preset, {})
+                    if preset_def:  # Only warn if preset has actual constraints
+                        constraint_desc = ", ".join(f"{k}: {v}" for k, v in preset_def.items())
+
+                        warnings.append(ValidationError(
+                            path=f"state.{entity_name}.fields.{field_name}",
+                            message=(
+                                f"Inferred '{inferred_preset}' preset from field name ({constraint_desc}). "
+                                f"Add 'preset: \"{inferred_preset}\"' to confirm, "
+                                f"or 'preset: \"none\"' to disable inference."
+                            ),
+                            code="CNS-006",
+                            category="constraint",
+                            severity="warning"
+                        ))
 
         return warnings

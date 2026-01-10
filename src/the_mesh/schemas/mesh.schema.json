@@ -71,7 +71,15 @@
         "required": { "type": "boolean", "default": true },
         "unique": { "type": "boolean", "default": false },
         "default": {},
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "minLength": { "type": "integer", "minimum": 0 },
+        "maxLength": { "type": "integer", "minimum": 0 },
+        "pattern": { "type": "string" },
+        "precision": { "type": "integer", "minimum": 0 },
+        "format": { "type": "string", "enum": ["email", "url", "uuid", "phone", "date", "datetime"] },
+        "preset": { "type": "string", "enum": ["money", "email", "id", "percentage", "age", "count", "signed_number", "text", "none"] }
       },
       "required": ["type"],
       "additionalProperties": false

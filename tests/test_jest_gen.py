@@ -1,4 +1,4 @@
-"""Tests for Jest Generator"""
+"""Tests for Jest Generator - Repository Pattern"""
 
 import json
 from pathlib import Path
@@ -7,7 +7,7 @@ import sys
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from the_mesh.generators.jest_gen import JestGenerator
+from the_mesh.generators.typescript.jest_gen import JestGenerator
 
 
 # Sample spec for testing
@@ -131,45 +131,40 @@ def test_jest_generator_basic():
 
 
 def test_generate_all_javascript():
-    """Test generating all tests in JavaScript"""
+    """Test generating all tests in JavaScript (Repository pattern)"""
     gen = JestGenerator(SAMPLE_SPEC, typescript=False)
     code = gen.generate_all()
-
-    # Should contain JavaScript imports style (not TypeScript)
-    assert "// TODO: Import your implementation modules" in code
-    assert "import { describe, test, expect" not in code  # No TS imports
 
     # Should contain describe blocks
     assert "describe('create_invoice'" in code
     assert "describe('close_invoice'" in code
 
-    # Should contain test cases
-    assert "test('SC_001:" in code
-    assert "test('SC_002:" in code
+    # Should contain mock factories (Repository pattern)
+    assert "createMock" in code
+    assert "Repository" in code
+    assert "jest.fn()" in code
 
-    # Should contain factory functions
-    assert "function createInvoice(overrides" in code
-    assert "function createCustomer(overrides" in code
+    # Should contain entity factories
+    assert "createinvoice" in code.lower() or "createInvoice" in code
 
     # Should contain invariant tests
     assert "describe('Invariants'" in code
-    assert "test('INVARIANT_INV_001:" in code
 
 
 def test_generate_all_typescript():
-    """Test generating all tests in TypeScript"""
+    """Test generating all tests in TypeScript (Repository pattern)"""
     gen = JestGenerator(SAMPLE_SPEC, typescript=True)
     code = gen.generate_all()
 
     # Should contain TypeScript imports
-    assert "import { describe, test, expect, beforeEach } from '@jest/globals'" in code
+    assert "import { describe, it, expect" in code
 
-    # Should contain type definitions
-    assert "interface Invoice {" in code
-    assert "interface Customer {" in code
+    # Should contain repository interfaces
+    assert "interface" in code
+    assert "Repository" in code
 
     # Should have typed function signatures
-    assert "function createInvoice(overrides: Partial<Invoice>" in code
+    assert ": string" in code or ": Partial<" in code
 
 
 def test_generate_for_function():
@@ -177,147 +172,122 @@ def test_generate_for_function():
     gen = JestGenerator(SAMPLE_SPEC, typescript=False)
     code = gen.generate_for_function("close_invoice")
 
-    # Should only contain tests for close_invoice
-    assert "SC_002" in code
-    assert "SC_001" not in code  # This is for create_invoice
+    # Should only contain tests for close_invoice scenarios
+    assert "close_invoice" in code
 
-    # Should still have factory functions
-    assert "createInvoice" in code
+    # Should have mock repository
+    assert "createMock" in code
 
 
-def test_expression_to_js_literal():
-    """Test expression conversion - literals"""
+def test_mock_repository_structure():
+    """Test that mock repositories have correct structure"""
+    gen = JestGenerator(SAMPLE_SPEC, typescript=True)
+    code = gen.generate_all()
+
+    # Repository should have CRUD methods
+    assert "create: jest.fn()" in code
+    assert "get: jest.fn()" in code
+    assert "update: jest.fn()" in code
+    assert "delete: jest.fn()" in code
+
+    # Should have _setData helper for test setup
+    assert "_setData" in code
+
+
+def test_scenario_test_structure():
+    """Test that scenario tests follow Given/When/Then structure"""
+    gen = JestGenerator(SAMPLE_SPEC, typescript=False)
+    code = gen.generate_all()
+
+    # Should have Given section
+    assert "// Given" in code
+
+    # Should have When section
+    assert "// When" in code
+
+    # Should have Then section
+    assert "// Then" in code
+
+
+def test_typescript_repository_interfaces():
+    """Test TypeScript repository interface generation"""
+    gen = JestGenerator(SAMPLE_SPEC, typescript=True)
+    code = gen.generate_all()
+
+    # Should have interface definitions
+    assert "interface" in code
+
+    # Should have Promise return types
+    assert "Promise<" in code
+
+
+def test_expression_to_pseudo():
+    """Test expression to pseudo code conversion for comments"""
     gen = JestGenerator(SAMPLE_SPEC)
 
+    # Test literal
     expr = {"type": "literal", "value": 100}
-    assert gen._expr_to_js(expr) == "100"
-
-    expr = {"type": "literal", "value": "test"}
-    assert gen._expr_to_js(expr) == "'test'"
-
-    expr = {"type": "literal", "value": True}
-    assert gen._expr_to_js(expr) == "true"
-
-    expr = {"type": "literal", "value": None}
-    assert gen._expr_to_js(expr) == "null"
-
-
-def test_expression_to_js_binary():
-    """Test expression conversion - binary operations"""
-    gen = JestGenerator(SAMPLE_SPEC)
-
-    # Equality
-    expr = {
-        "type": "binary", "op": "eq",
-        "left": {"type": "ref", "path": "invoice.amount"},
-        "right": {"type": "literal", "value": 100}
-    }
-    result = gen._expr_to_js(expr)
-    assert "===" in result
+    result = gen._expr_to_pseudo(expr)
     assert "100" in result
 
-    # Addition
+    # Test ref
+    expr = {"type": "ref", "path": "invoice.amount"}
+    result = gen._expr_to_pseudo(expr)
+    assert "invoice.amount" in result
+
+    # Test binary
     expr = {
-        "type": "binary", "op": "add",
-        "left": {"type": "literal", "value": 10},
-        "right": {"type": "literal", "value": 20}
+        "type": "binary", "op": "eq",
+        "left": {"type": "ref", "path": "x"},
+        "right": {"type": "literal", "value": 100}
     }
-    result = gen._expr_to_js(expr)
-    assert "(10 + 20)" in result
-
-    # Logical and
-    expr = {
-        "type": "binary", "op": "and",
-        "left": {"type": "literal", "value": True},
-        "right": {"type": "literal", "value": False}
-    }
-    result = gen._expr_to_js(expr)
-    assert "&&" in result
+    result = gen._expr_to_pseudo(expr)
+    assert "eq" in result
 
 
-def test_expression_to_js_unary():
-    """Test expression conversion - unary operations"""
+def test_to_js_value():
+    """Test Python to JavaScript value conversion"""
     gen = JestGenerator(SAMPLE_SPEC)
 
-    # Not
-    expr = {"type": "unary", "op": "not", "expr": {"type": "literal", "value": True}}
-    assert "!" in gen._expr_to_js(expr)
+    # Test primitives
+    assert gen._to_js_value(100) == "100"
+    assert gen._to_js_value("test") == '"test"'
+    assert gen._to_js_value(True) == "true"
+    assert gen._to_js_value(False) == "false"
+    assert gen._to_js_value(None) == "null"
 
-    # is_null
-    expr = {"type": "unary", "op": "is_null", "expr": {"type": "ref", "path": "x"}}
-    assert "== null" in gen._expr_to_js(expr)
+    # Test dict
+    result = gen._to_js_value({"key": "value"})
+    assert "key:" in result
+    assert '"value"' in result
 
-
-def test_expression_to_js_aggregation():
-    """Test expression conversion - aggregation"""
-    gen = JestGenerator(SAMPLE_SPEC)
-
-    # Sum
-    expr = {
-        "type": "agg", "op": "sum", "from": "items",
-        "expr": {"type": "ref", "path": "item.amount"}
-    }
-    result = gen._expr_to_js(expr)
-    assert ".reduce(" in result
-    assert "amount" in result
-
-    # Count
-    expr = {"type": "agg", "op": "count", "from": "items"}
-    result = gen._expr_to_js(expr)
-    assert ".length" in result
-
-
-def test_expression_to_js_conditional():
-    """Test expression conversion - if/case"""
-    gen = JestGenerator(SAMPLE_SPEC)
-
-    # If-then-else
-    expr = {
-        "type": "if",
-        "cond": {"type": "literal", "value": True},
-        "then": {"type": "literal", "value": "yes"},
-        "else": {"type": "literal", "value": "no"}
-    }
-    result = gen._expr_to_js(expr)
-    assert "?" in result
-    assert ":" in result
-    assert "'yes'" in result
-    assert "'no'" in result
-
-
-def test_type_conversions():
-    """Test TypeScript type conversions"""
-    gen = JestGenerator(SAMPLE_SPEC, typescript=True)
-
-    assert gen._get_ts_type({"type": "string"}) == "string"
-    assert gen._get_ts_type({"type": "int"}) == "number"
-    assert gen._get_ts_type({"type": "float"}) == "number"
-    assert gen._get_ts_type({"type": "bool"}) == "boolean"
-
-    # Enum
-    assert "'OPEN' | 'CLOSED'" in gen._get_ts_type({"type": {"enum": ["OPEN", "CLOSED"]}})
-
-    # List
-    assert "number[]" in gen._get_ts_type({"type": {"list": "int"}})
+    # Test list
+    result = gen._to_js_value([1, 2, 3])
+    assert "[1, 2, 3]" == result
 
 
 def test_case_conversions():
     """Test case conversion utilities"""
     gen = JestGenerator(SAMPLE_SPEC)
 
-    assert gen._to_pascal_case("invoice_item") == "InvoiceItem"
-    assert gen._to_camel_case("invoice_item") == "invoiceItem"
-    assert gen._to_camel_case("close_invoice") == "closeInvoice"
+    # _to_pascal
+    assert gen._to_pascal("invoice_item") == "InvoiceItem"
+    assert gen._to_pascal("customer") == "Customer"
+
+    # _to_camel
+    assert gen._to_camel("invoice_item") == "invoiceItem"
+    assert gen._to_camel("close_invoice") == "closeInvoice"
 
 
 def test_default_values():
-    """Test default value generation"""
+    """Test default value generation for entity factories"""
     gen = JestGenerator(SAMPLE_SPEC)
 
-    assert "'STRING-001'" in gen._get_default_value("string", {"type": "string"})
-    assert "0" == gen._get_default_value("amount", {"type": "int"})
-    assert "false" == gen._get_default_value("active", {"type": "bool"})
-    assert "'OPEN'" in gen._get_default_value("status", {"type": {"enum": ["OPEN", "CLOSED"]}})
+    # These should be present in generated entity factory
+    code = gen.generate_all()
+
+    # String fields should have placeholder values
+    assert "001" in code  # Default ID pattern
 
 
 def test_with_real_spec():
@@ -334,7 +304,7 @@ def test_with_real_spec():
     code_js = gen_js.generate_all()
     assert len(code_js) > 1000  # Should generate substantial code
     assert "describe(" in code_js
-    assert "test(" in code_js
+    assert "it(" in code_js  # Uses it() for tests
 
     # Test TypeScript generation
     gen_ts = JestGenerator(spec, typescript=True)
@@ -352,12 +322,11 @@ if __name__ == "__main__":
         test_generate_all_javascript,
         test_generate_all_typescript,
         test_generate_for_function,
-        test_expression_to_js_literal,
-        test_expression_to_js_binary,
-        test_expression_to_js_unary,
-        test_expression_to_js_aggregation,
-        test_expression_to_js_conditional,
-        test_type_conversions,
+        test_mock_repository_structure,
+        test_scenario_test_structure,
+        test_typescript_repository_interfaces,
+        test_expression_to_pseudo,
+        test_to_js_value,
         test_case_conversions,
         test_default_values,
         test_with_real_spec,

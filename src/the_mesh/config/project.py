@@ -22,6 +22,14 @@ class ProjectConfig:
             "auto_worktree": True,
             "auto_pr": True,
             "cleanup_worktree": False
+        },
+        "implementation": {
+            # Default import pattern: {src_path}.{function}
+            # Can use {function}, {Function}, {src_path}
+            "python_module": "{src_path}.{function}",
+            "typescript_module": "./{src_path}/{function}",
+            # Per-function overrides
+            "functions": {}
         }
     }
 
@@ -112,3 +120,57 @@ class ProjectConfig:
         if config["test_framework"] in ("jest", "vitest"):
             return "jest.config.json"
         return "pytest.ini"
+
+    def get_import_module(self, function_name: str) -> str:
+        """Get the import module path for a function.
+
+        Returns a module path like 'src.orders.create_order' (Python)
+        or './src/orders/createOrder' (TypeScript).
+        """
+        config = self.load()
+        impl_config = config.get("implementation", {})
+
+        # Check for per-function override
+        func_overrides = impl_config.get("functions", {})
+        if function_name in func_overrides:
+            return func_overrides[function_name].get("module", function_name)
+
+        # Use pattern-based default
+        language = config.get("language", "python")
+        src_path = config.get("src_path", "src")
+
+        if language in ("typescript", "javascript"):
+            pattern = impl_config.get("typescript_module", "./{src_path}/{function}")
+            # Convert to camelCase for TypeScript
+            parts = function_name.split("_")
+            func_camel = parts[0] + "".join(p.capitalize() for p in parts[1:])
+            func_pascal = "".join(p.capitalize() for p in parts)
+            return pattern.format(
+                src_path=src_path,
+                function=func_camel,
+                Function=func_pascal
+            )
+        else:
+            pattern = impl_config.get("python_module", "{src_path}.{function}")
+            parts = function_name.split("_")
+            func_pascal = "".join(p.capitalize() for p in parts)
+            return pattern.format(
+                src_path=src_path,
+                function=function_name,
+                Function=func_pascal
+            )
+
+    def set_function_module(self, function_name: str, module: str) -> None:
+        """Set the import module for a specific function."""
+        config = self.load()
+        if "implementation" not in config:
+            config["implementation"] = {"functions": {}}
+        if "functions" not in config["implementation"]:
+            config["implementation"]["functions"] = {}
+
+        config["implementation"]["functions"][function_name] = {"module": module}
+        self.save(config)
+
+    def get_all_import_modules(self, function_names: list[str]) -> dict[str, str]:
+        """Get import modules for multiple functions at once."""
+        return {fn: self.get_import_module(fn) for fn in function_names}

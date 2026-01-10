@@ -14,14 +14,14 @@ from pathlib import Path
 from typing import Any
 from dataclasses import dataclass
 
-from the_mesh.generators.pytest_gen import PytestGenerator
-from the_mesh.generators.pytest_unit_gen import PytestUnitGenerator
-from the_mesh.generators.postcondition_gen import PostConditionGenerator
-from the_mesh.generators.state_transition_gen import StateTransitionGenerator
-from the_mesh.generators.jest_gen import JestGenerator
-from the_mesh.generators.jest_unit_gen import JestUnitGenerator
-from the_mesh.generators.jest_postcondition_gen import JestPostConditionGenerator
-from the_mesh.generators.jest_state_transition_gen import JestStateTransitionGenerator
+from the_mesh.generators.python.pytest_gen import PytestGenerator
+from the_mesh.generators.python.pytest_unit_gen import PytestUnitGenerator
+from the_mesh.generators.python.postcondition_gen import PostConditionGenerator
+from the_mesh.generators.python.state_transition_gen import StateTransitionGenerator
+from the_mesh.generators.typescript.jest_gen import JestGenerator
+from the_mesh.generators.typescript.jest_unit_gen import JestUnitGenerator
+from the_mesh.generators.typescript.jest_postcondition_gen import JestPostConditionGenerator
+from the_mesh.generators.typescript.jest_state_transition_gen import JestStateTransitionGenerator
 from the_mesh.graph.graph import DependencyGraph
 from the_mesh.config.project import ProjectConfig
 
@@ -66,9 +66,13 @@ class TaskPackageGenerator:
         """Generate all test files to .mesh/tests/"""
         files = {}
 
+        # Get import modules from config for all functions
+        function_names = list(self.functions.keys())
+        import_modules = self.project_config.get_all_import_modules(function_names)
+
         if language == "python":
             # AT tests (Acceptance Tests - scenario-based)
-            at_gen = PytestGenerator(self.spec)
+            at_gen = PytestGenerator(self.spec, import_modules=import_modules)
             for func_name in self.functions:
                 code = at_gen.generate_for_function(func_name)
                 files[f"at/test_{func_name}_at.py"] = code
@@ -78,12 +82,12 @@ class TaskPackageGenerator:
             files["ut/test_unit.py"] = ut_gen.generate_all()
 
             # PC tests (PostCondition - verify create/update/delete)
-            pc_gen = PostConditionGenerator(self.spec)
+            pc_gen = PostConditionGenerator(self.spec, import_modules=import_modules)
             files["pc/test_postcondition.py"] = pc_gen.generate_all()
 
             # ST tests (State Transition - state machine behavior)
             if self.spec.get("stateMachines"):
-                st_gen = StateTransitionGenerator(self.spec)
+                st_gen = StateTransitionGenerator(self.spec, import_modules=import_modules)
                 files["st/test_state_transition.py"] = st_gen.generate_all()
 
         elif language in ("javascript", "typescript"):
@@ -91,7 +95,7 @@ class TaskPackageGenerator:
             ext = "ts" if is_ts else "js"
 
             # AT tests (Acceptance Tests)
-            at_gen = JestGenerator(self.spec, typescript=is_ts)
+            at_gen = JestGenerator(self.spec, typescript=is_ts, import_modules=import_modules)
             for func_name in self.functions:
                 code = at_gen.generate_for_function(func_name)
                 files[f"at/{func_name}.at.test.{ext}"] = code
@@ -101,12 +105,12 @@ class TaskPackageGenerator:
             files[f"ut/unit.test.{ext}"] = ut_gen.generate_all()
 
             # PC tests (PostCondition)
-            pc_gen = JestPostConditionGenerator(self.spec, typescript=is_ts)
+            pc_gen = JestPostConditionGenerator(self.spec, typescript=is_ts, import_modules=import_modules)
             files[f"pc/postcondition.test.{ext}"] = pc_gen.generate_all()
 
             # ST tests (State Transition)
             if self.spec.get("stateMachines"):
-                st_gen = JestStateTransitionGenerator(self.spec, typescript=is_ts)
+                st_gen = JestStateTransitionGenerator(self.spec, typescript=is_ts, import_modules=import_modules)
                 files[f"st/state_transition.test.{ext}"] = st_gen.generate_all()
 
         return files
