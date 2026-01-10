@@ -1,7 +1,5 @@
 """TypeScript type definition generator for The Mesh."""
 
-from typing import Any
-
 
 class TypeScriptGenerator:
     """Generate TypeScript type definitions from TRIR specification.
