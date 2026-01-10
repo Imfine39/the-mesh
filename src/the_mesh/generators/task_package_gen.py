@@ -14,9 +14,6 @@ from pathlib import Path
 from typing import Any
 from dataclasses import dataclass
 
-# Import generators
-import sys
-
 from the_mesh.generators.pytest_gen import PytestGenerator
 from the_mesh.generators.pytest_unit_gen import PytestUnitGenerator
 from the_mesh.generators.postcondition_gen import PostConditionGenerator

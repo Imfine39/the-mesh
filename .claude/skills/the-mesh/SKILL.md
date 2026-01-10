@@ -101,7 +101,6 @@ Always validate after changes:
 python3 -c "
 from the_mesh.core.validator import MeshValidator
 from the_mesh.core.storage import SpecStorage
-import json
 
 storage = SpecStorage()
 spec = storage.read_spec('PROJECT_NAME')
@@ -117,8 +116,30 @@ for err in result.errors[:5]:
 
 **This is the key to catching frontend/backend mismatches!**
 
+Use `generate_task_package` to generate all 4 test types at once:
+
 ```bash
-# Generate all test types
+python3 -c "
+from the_mesh.core.handlers.generation import generate_task_package
+from the_mesh.core.validator import MeshValidator
+from the_mesh.core.storage import SpecStorage
+
+storage = SpecStorage()
+validator = MeshValidator()
+
+# Generate complete task package with all tests
+result = generate_task_package(validator, storage, {
+    'spec_id': 'PROJECT_NAME',
+    'function_name': 'create_item',
+    'language': 'python'
+})
+print(result)
+"
+```
+
+Or generate individual test types:
+
+```bash
 python3 -c "
 from the_mesh.core.handlers.generation import generate_tests
 from the_mesh.core.validator import MeshValidator
@@ -126,10 +147,6 @@ from the_mesh.core.storage import SpecStorage
 
 storage = SpecStorage()
 validator = MeshValidator()
-
-# Acceptance tests (scenario-based)
-result = generate_tests(validator, storage, {'spec_id': 'PROJECT_NAME', 'framework': 'pytest'})
-print(result['code'])
 
 # PostCondition tests (verify create/update/delete actually save data!)
 result = generate_tests(validator, storage, {'spec_id': 'PROJECT_NAME', 'framework': 'pytest-postcondition'})
@@ -147,21 +164,35 @@ Now implement the backend code. The tests will fail if:
 ### 7. Run Tests
 
 ```bash
-pytest tests/test_postcondition_*.py -v
+pytest .mesh/tests/ -v
 ```
 
 ---
 
-## Available Test Frameworks
+## Test Types (AT/UT/PC/ST)
 
-| Framework | Purpose | Catches |
-|-----------|---------|---------|
-| `pytest` | Scenario acceptance tests | Logic errors |
-| `pytest-ut` | Unit tests (boundaries, errors) | Edge cases |
-| `pytest-postcondition` | **Post-action verification** | **Missing field saves!** |
-| `pytest-state` | State machine transitions | Invalid transitions |
-| `jest`, `jest-ts` | JS/TS acceptance tests | Frontend logic |
-| `jest-postcondition`, `jest-ts-postcondition` | JS post-action tests | Frontend saves |
+All test types are generated for both Python (pytest) and JavaScript/TypeScript (Jest):
+
+| Type | Directory | Purpose | Catches |
+|------|-----------|---------|---------|
+| **AT** | `at/` | Acceptance Tests (scenario-based) | Logic errors |
+| **UT** | `ut/` | Unit Tests (boundaries, errors) | Edge cases |
+| **PC** | `pc/` | PostCondition Tests | **Missing field saves!** |
+| **ST** | `st/` | State Transition Tests | Invalid state changes |
+
+### Framework Options
+
+**Python:**
+- `pytest` - AT (acceptance)
+- `pytest-ut` - UT (unit)
+- `pytest-postcondition` - PC (postcondition)
+- `pytest-state` - ST (state transition)
+
+**JavaScript/TypeScript:**
+- `jest` / `jest-ts` - AT
+- `jest-ut` / `jest-ts-ut` - UT
+- `jest-postcondition` / `jest-ts-postcondition` - PC
+- `jest-state` / `jest-ts-state` - ST
 
 ---
 
@@ -211,11 +242,11 @@ python3 -c "
 from the_mesh.core.handlers.frontend import generate_openapi
 from the_mesh.core.validator import MeshValidator
 from the_mesh.core.storage import SpecStorage
+import json
 
 storage = SpecStorage()
 validator = MeshValidator()
 result = generate_openapi(validator, storage, {'spec_id': 'PROJECT_NAME'})
-import json
 print(json.dumps(result['schema'], indent=2))
 "
 ```
@@ -234,6 +265,20 @@ print(result['code'])
 "
 ```
 
+### Human-Readable Export (ER Diagrams, Tables)
+```bash
+python3 -c "
+from the_mesh.core.handlers.frontend import export_human_readable
+from the_mesh.core.validator import MeshValidator
+from the_mesh.core.storage import SpecStorage
+
+storage = SpecStorage()
+validator = MeshValidator()
+result = export_human_readable(validator, storage, {'spec_id': 'PROJECT_NAME', 'format': 'er'})
+print(result['content']['er_diagram'])
+"
+```
+
 ---
 
 ## Preventing Common Issues
@@ -244,7 +289,7 @@ print(result['code'])
 
 1. Add field to function's `input`
 2. Add field to `post.action.with`
-3. Generate postcondition tests
+3. Generate postcondition tests: `generate_tests(..., framework="pytest-postcondition")`
 4. Tests will fail until backend properly handles the field
 
 ### Issue: API schema drift
@@ -271,7 +316,9 @@ diff openapi.json backend/openapi.json
 | Add function | `spec_update_section(section="functions", key="name", data={...})` |
 | Add scenario | `spec_update_section(section="scenarios", key="AT-001", data={...})` |
 | Validate | `validator.validate(spec)` |
-| Generate tests | `generate_tests(..., framework="pytest-postcondition")` |
+| Generate all tests | `generate_task_package(..., function_name="all")` |
+| Generate specific test | `generate_tests(..., framework="pytest-postcondition")` |
 | Generate types | `generate_typescript_types(...)` |
 | Generate OpenAPI | `generate_openapi(...)` |
-| Export readable | `export_human_readable(..., format="er")` |
+| Export ER diagram | `export_human_readable(..., format="er")` |
+| Export YAML | `export_yaml(...)` |
