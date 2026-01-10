@@ -1,4 +1,4 @@
-"""Generation handlers for The Mesh MCP Server."""
+"""Generation handlers for The Mesh."""
 
 import json
 from pathlib import Path
@@ -6,12 +6,70 @@ from typing import Any
 
 from the_mesh.core.validator import MeshValidator
 from the_mesh.graph.graph import DependencyGraph
-from the_mesh.mcp.storage import SpecStorage
+from the_mesh.core.storage import SpecStorage
 from the_mesh.generators.pytest_gen import PytestGenerator
 from the_mesh.generators.pytest_unit_gen import PytestUnitGenerator
+from the_mesh.generators.postcondition_gen import PostConditionGenerator
+from the_mesh.generators.state_transition_gen import StateTransitionGenerator
 from the_mesh.generators.jest_gen import JestGenerator
-from the_mesh.generators.unit_test_gen import UnitTestGenerator
+from the_mesh.generators.jest_unit_gen import JestUnitGenerator
+from the_mesh.generators.jest_postcondition_gen import JestPostConditionGenerator
+from the_mesh.generators.jest_state_transition_gen import JestStateTransitionGenerator
 from the_mesh.generators.task_package_gen import TaskPackageGenerator
+
+
+def compute_spec_changes(previous_spec: dict | None, current_spec: dict) -> list[dict]:
+    """Compute JSON Patch-like changes between two specs.
+
+    Returns a list of changes in simplified format:
+    [{"op": "add/replace/remove", "path": "/section/key", "value": ...}]
+    """
+    if previous_spec is None:
+        # New spec - everything is added
+        changes = []
+        for section, data in current_spec.items():
+            if section == "meta":
+                continue
+            if isinstance(data, dict):
+                for key in data:
+                    changes.append({"op": "add", "path": f"/{section}/{key}"})
+            elif isinstance(data, list):
+                changes.append({"op": "add", "path": f"/{section}"})
+        return changes
+
+    changes = []
+    sections = ["state", "functions", "scenarios", "derived", "invariants", "views", "routes"]
+
+    for section in sections:
+        prev_data = previous_spec.get(section, {})
+        curr_data = current_spec.get(section, {})
+
+        # Handle dict sections
+        if isinstance(prev_data, dict) and isinstance(curr_data, dict):
+            # Added keys
+            for key in curr_data:
+                if key not in prev_data:
+                    changes.append({"op": "add", "path": f"/{section}/{key}"})
+                elif curr_data[key] != prev_data[key]:
+                    changes.append({"op": "replace", "path": f"/{section}/{key}"})
+
+            # Removed keys
+            for key in prev_data:
+                if key not in curr_data:
+                    changes.append({"op": "remove", "path": f"/{section}/{key}"})
+
+        # Handle list sections (invariants)
+        elif isinstance(prev_data, list) and isinstance(curr_data, list):
+            if prev_data != curr_data:
+                changes.append({"op": "replace", "path": f"/{section}"})
+
+        # Section added/removed
+        elif prev_data and not curr_data:
+            changes.append({"op": "remove", "path": f"/{section}"})
+        elif curr_data and not prev_data:
+            changes.append({"op": "add", "path": f"/{section}"})
+
+    return changes
 
 
 def _load_spec_from_args(storage: SpecStorage, args: dict) -> dict | None:
@@ -142,12 +200,12 @@ def generate_tests(validator: MeshValidator, storage: SpecStorage, args: dict) -
         file_name = "generated.test.ts"
         test_type = "acceptance"
     elif framework == "jest-ut":
-        generator = UnitTestGenerator(spec, typescript=False)
+        generator = JestUnitGenerator(spec, typescript=False)
         file_ext = "js"
         file_name = "generated.unit.test.js"
         test_type = "unit"
     elif framework == "jest-ts-ut":
-        generator = UnitTestGenerator(spec, typescript=True)
+        generator = JestUnitGenerator(spec, typescript=True)
         file_ext = "ts"
         file_name = "generated.unit.test.ts"
         test_type = "unit"

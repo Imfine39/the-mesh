@@ -1,4 +1,4 @@
-"""Validation handlers for The Mesh MCP Server."""
+"""Validation handlers for The Mesh."""
 
 import copy
 import json
@@ -9,7 +9,7 @@ from the_mesh.core.validator import MeshValidator
 from the_mesh.core.errors import ValidationError
 from the_mesh.core.utils import generate_fix_patches
 from the_mesh.graph.graph import DependencyGraph
-from the_mesh.mcp.storage import SpecStorage
+from the_mesh.core.storage import SpecStorage
 
 
 def load_spec(storage: SpecStorage, spec: dict | None, spec_path: str | None) -> dict:

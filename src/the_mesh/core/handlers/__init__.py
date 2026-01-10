@@ -1,14 +1,14 @@
-"""Handler registry for The Mesh MCP Server.
+"""Handler registry for The Mesh.
 
 All tool handlers are organized by category and registered in a unified registry.
 """
 
-from the_mesh.mcp.handlers import validation
-from the_mesh.mcp.handlers import spec_crud
-from the_mesh.mcp.handlers import generation
-from the_mesh.mcp.handlers import task
-from the_mesh.mcp.handlers import project
-from the_mesh.mcp.handlers import frontend
+from the_mesh.core.handlers import validation
+from the_mesh.core.handlers import spec_crud
+from the_mesh.core.handlers import generation
+from the_mesh.core.handlers import task
+from the_mesh.core.handlers import project
+from the_mesh.core.handlers import frontend
 
 
 # Unified handler registry - combines all handler modules

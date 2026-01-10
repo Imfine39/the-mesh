@@ -30,7 +30,7 @@ from pathlib import Path
 
 # Add parent directory to path for imports
 
-from the_mesh.mcp.server import TaskManager
+from the_mesh.core.task import TaskManager
 
 
 def main():

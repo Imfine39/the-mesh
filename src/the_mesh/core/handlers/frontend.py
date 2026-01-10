@@ -1,11 +1,11 @@
-"""Frontend generation handlers for The Mesh MCP Server."""
+"""Frontend generation handlers for The Mesh."""
 
 import json
 from pathlib import Path
 from typing import Any
 
 from the_mesh.core.validator import MeshValidator
-from the_mesh.mcp.storage import SpecStorage
+from the_mesh.core.storage import SpecStorage
 from the_mesh.generators.typescript_gen import TypeScriptGenerator
 from the_mesh.generators.openapi_gen import OpenAPIGenerator
 from the_mesh.generators.zod_gen import ZodGenerator

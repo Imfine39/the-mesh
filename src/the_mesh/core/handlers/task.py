@@ -1,11 +1,11 @@
-"""Task management handlers for The Mesh MCP Server."""
+"""Task management handlers for The Mesh."""
 
 from pathlib import Path
 from typing import Any
 
 from the_mesh.core.validator import MeshValidator
-from the_mesh.mcp.storage import SpecStorage
-from the_mesh.mcp.task_manager import TaskManager
+from the_mesh.core.storage import SpecStorage
+from the_mesh.core.task import TaskManager
 
 
 def activate_task(validator: MeshValidator, storage: SpecStorage, args: dict) -> dict:

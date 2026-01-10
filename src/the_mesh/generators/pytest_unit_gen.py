@@ -214,13 +214,15 @@ class PytestUnitGenerator:
         cases = []
 
         for func_name, func_def in self.functions.items():
-            for i, error_case in enumerate(func_def.get("error_cases", [])):
-                error_code = error_case.get("code", f"ERR_{i+1:03d}")
-                when_expr = error_case.get("when", {})
+            # Note: schema uses "error" not "error_cases"
+            for i, error_def in enumerate(func_def.get("error", [])):
+                error_code = error_def.get("code", f"ERR_{i+1:03d}")
+                when_expr = error_def.get("when", {})
+                reason = error_def.get("reason", "")
 
                 cases.append(TestCase(
                     id=f"ut_{func_name}_{error_code.lower().replace('-', '_')}",
-                    description=f"{func_name}: {error_case.get('message', error_code)}",
+                    description=f"{func_name}: {reason or error_code}",
                     category="error_case",
                     target=func_name,
                     inputs=self._make_error_trigger_inputs(when_expr, func_def),
@@ -248,7 +250,8 @@ class PytestUnitGenerator:
 
         for func_name, func_def in self.functions.items():
             for i, pre in enumerate(func_def.get("pre", [])):
-                check_expr = pre.get("check", {})
+                # Note: schema uses "expr" not "check"
+                check_expr = pre.get("expr", {})
 
                 cases.append(TestCase(
                     id=f"ut_{func_name}_pre{i+1}_pass",
@@ -474,16 +477,240 @@ class PytestUnitGenerator:
         return {entity: self._get_sample_entity(entity), "_condition_should_be": False}
 
     def _make_error_trigger_inputs(self, when_expr: dict, func_def: dict) -> dict:
-        return {"_trigger_error": True, "_expr": str(when_expr)[:50]}
+        """Generate inputs that trigger the error condition (make when_expr TRUE)"""
+        if not when_expr:
+            return {"_trigger_error": True, "_comment": "no when expression"}
+
+        inputs = self._get_function_default_inputs(func_def)
+        analyzed = self._analyze_expr_for_trigger(when_expr, func_def, trigger=True)
+        inputs.update(analyzed)
+        return inputs
 
     def _make_error_boundary_inputs(self, when_expr: dict, func_def: dict) -> dict | None:
-        return {"_boundary": True, "_expr": str(when_expr)[:50]}
+        """Generate inputs at the boundary (just valid, error NOT triggered)"""
+        if not when_expr:
+            return None
+
+        inputs = self._get_function_default_inputs(func_def)
+        analyzed = self._analyze_expr_for_trigger(when_expr, func_def, trigger=False)
+        inputs.update(analyzed)
+        inputs["_boundary"] = True
+        return inputs
 
     def _make_precondition_pass_inputs(self, check_expr: dict, func_def: dict) -> dict:
-        return {"_precondition_should_pass": True}
+        """Generate inputs that satisfy the precondition (make check_expr TRUE)"""
+        inputs = self._get_function_default_inputs(func_def)
+        analyzed = self._analyze_expr_for_trigger(check_expr, func_def, trigger=True)
+        inputs.update(analyzed)
+        return inputs
 
     def _make_precondition_fail_inputs(self, check_expr: dict, func_def: dict) -> dict:
-        return {"_precondition_should_fail": True}
+        """Generate inputs that violate the precondition (make check_expr FALSE)"""
+        inputs = self._get_function_default_inputs(func_def)
+        analyzed = self._analyze_expr_for_trigger(check_expr, func_def, trigger=False)
+        inputs.update(analyzed)
+        return inputs
+
+    def _get_function_default_inputs(self, func_def: dict) -> dict:
+        """Get default input values for a function from its input schema"""
+        inputs = {}
+        input_schema = func_def.get("input", {})
+        for field_name, field_def in input_schema.items():
+            inputs[field_name] = self._get_default_value(field_def.get("type"))
+        return inputs
+
+    def _analyze_expr_for_trigger(self, expr: dict, func_def: dict, trigger: bool) -> dict:
+        """
+        Analyze expression to generate inputs that trigger or avoid a condition.
+
+        Args:
+            expr: TRIR expression (binary, unary, ref, input, literal, etc.)
+            func_def: Function definition for context
+            trigger: If True, generate inputs that make expr TRUE; if False, make expr FALSE
+
+        Returns:
+            Dict of input values that achieve the desired condition
+        """
+        if not isinstance(expr, dict):
+            return {}
+
+        expr_type = expr.get("type")
+        result = {}
+
+        if expr_type == "binary":
+            op = expr.get("op")
+            left = expr.get("left", {})
+            right = expr.get("right", {})
+
+            # Extract input names and ref paths
+            left_input = self._extract_input_name(left)
+            right_input = self._extract_input_name(right)
+            left_ref = self._extract_ref_path(left)
+            right_ref = self._extract_ref_path(right)
+
+            # Handle comparison operators
+            if op in ("gt", "ge", "lt", "le", "eq", "ne"):
+                result = self._generate_comparison_values(
+                    op, left_input, right_input, left_ref, right_ref, trigger
+                )
+
+            # Handle logical operators (recursively analyze)
+            elif op == "and":
+                # For AND: trigger=True means both must be True
+                # trigger=False means at least one must be False
+                if trigger:
+                    result.update(self._analyze_expr_for_trigger(left, func_def, True))
+                    result.update(self._analyze_expr_for_trigger(right, func_def, True))
+                else:
+                    # Make the first operand False
+                    result.update(self._analyze_expr_for_trigger(left, func_def, False))
+
+            elif op == "or":
+                # For OR: trigger=True means at least one must be True
+                # trigger=False means both must be False
+                if trigger:
+                    result.update(self._analyze_expr_for_trigger(left, func_def, True))
+                else:
+                    result.update(self._analyze_expr_for_trigger(left, func_def, False))
+                    result.update(self._analyze_expr_for_trigger(right, func_def, False))
+
+            elif op in ("in", "not_in"):
+                # For in/not_in, set value to be in/not in the list
+                right_literal = self._extract_literal(right)
+
+                if left_input:
+                    if (op == "in" and trigger) or (op == "not_in" and not trigger):
+                        # Set to a value IN the list
+                        if isinstance(right_literal, list) and right_literal:
+                            result[left_input] = right_literal[0]
+                        else:
+                            result[left_input] = "# set to value IN list"
+                    else:
+                        # Set to a value NOT IN the list
+                        result[left_input] = "_INVALID_VALUE_"
+
+                elif left_ref:
+                    # Entity state check (e.g., ar_invoice.status IN ['OPEN', 'PARTIAL'])
+                    setup_key = f"_setup_{left_ref.replace('.', '_')}"
+                    if (op == "in" and trigger) or (op == "not_in" and not trigger):
+                        if isinstance(right_literal, list) and right_literal:
+                            result[setup_key] = right_literal[0]
+                        else:
+                            result[setup_key] = "# set to value IN list"
+                    else:
+                        result[setup_key] = "_INVALID_STATE_"
+
+        elif expr_type == "unary":
+            op = expr.get("op")
+            operand = expr.get("operand", {})
+            if op == "not":
+                # NOT: invert the trigger condition
+                result = self._analyze_expr_for_trigger(operand, func_def, not trigger)
+
+        elif expr_type == "input":
+            # Direct input reference (e.g., boolean input)
+            name = expr.get("name")
+            if name:
+                result[name] = trigger
+
+        elif expr_type == "principal":
+            # Principal checks (role/permission)
+            op = expr.get("op")
+            if op == "has_role":
+                role = expr.get("role")
+                if trigger:
+                    result["_principal_role"] = role
+                else:
+                    result["_principal_role"] = f"_NOT_{role}_"
+            elif op == "has_permission":
+                perm = expr.get("permission")
+                if trigger:
+                    result["_principal_permission"] = perm
+                else:
+                    result["_principal_permission"] = f"_NOT_{perm}_"
+
+        elif expr_type == "ref":
+            # Direct ref expression (e.g., checking boolean field)
+            path = expr.get("path")
+            if path:
+                setup_key = f"_setup_{path.replace('.', '_')}"
+                result[setup_key] = trigger
+
+        return result
+
+    def _extract_input_name(self, expr: dict) -> str | None:
+        """Extract input name from expression if it's an input reference"""
+        if not isinstance(expr, dict):
+            return None
+        if expr.get("type") == "input":
+            return expr.get("name")
+        return None
+
+    def _extract_ref_path(self, expr: dict) -> str | None:
+        """Extract ref path from expression if it's a reference"""
+        if not isinstance(expr, dict):
+            return None
+        if expr.get("type") == "ref":
+            return expr.get("path")
+        return None
+
+    def _extract_literal(self, expr: dict) -> Any:
+        """Extract literal value from expression if it's a literal"""
+        if not isinstance(expr, dict):
+            return None
+        if expr.get("type") == "literal":
+            return expr.get("value")
+        return None
+
+    def _generate_comparison_values(
+        self, op: str, left_input: str | None, right_input: str | None,
+        left_ref: str | None, right_ref: str | None, trigger: bool
+    ) -> dict:
+        """
+        Generate input values for comparison operators.
+
+        Examples:
+            amount > open_amount with trigger=True → amount=60000, open_amount=50000
+            amount > open_amount with trigger=False → amount=50000, open_amount=50000
+        """
+        result = {}
+        base_value = 50000
+        delta = 10000
+
+        # Map operators to value relationships
+        if trigger:
+            # Make condition TRUE
+            value_map = {
+                "gt": (base_value + delta, base_value),      # left > right
+                "ge": (base_value, base_value),               # left >= right
+                "lt": (base_value - delta, base_value),      # left < right
+                "le": (base_value, base_value),               # left <= right
+                "eq": (base_value, base_value),               # left == right
+                "ne": (base_value + delta, base_value),      # left != right
+            }
+        else:
+            # Make condition FALSE (at boundary)
+            value_map = {
+                "gt": (base_value, base_value),               # NOT (left > right)
+                "ge": (base_value - delta, base_value),      # NOT (left >= right)
+                "lt": (base_value, base_value),               # NOT (left < right)
+                "le": (base_value + delta, base_value),      # NOT (left <= right)
+                "eq": (base_value + delta, base_value),      # NOT (left == right)
+                "ne": (base_value, base_value),               # NOT (left != right)
+            }
+
+        left_val, right_val = value_map.get(op, (base_value, base_value))
+
+        if left_input:
+            result[left_input] = left_val
+        if right_input:
+            result[right_input] = right_val
+        if left_ref:
+            result[f"_setup_{left_ref.replace('.', '_')}"] = left_val
+        if right_ref:
+            result[f"_setup_{right_ref.replace('.', '_')}"] = right_val
+
+        return result
 
     def _to_py_repr(self, obj: Any) -> str:
         """Convert to Python repr string"""

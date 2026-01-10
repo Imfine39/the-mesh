@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "the-mesh"
 version = "0.2.0"
-description = "Specification validation MCP server for Claude Code"
+description = "TRIR specification-driven development framework for Claude Code"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "The Mesh Contributors"}
 ]
-keywords = ["mcp", "specification", "validation", "claude", "ai"]
+keywords = ["trir", "specification", "validation", "claude", "ai", "code-generation"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -24,7 +24,6 @@ classifiers = [
 ]
 dependencies = [
     "jsonschema>=4.20.0",
-    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -34,8 +33,9 @@ dev = [
     "ruff",
 ]
 
-[project.scripts]
-the_mesh = "the_mesh.mcp.server:main_sync"
+# CLI is provided via skills scripts (.claude/skills/the-mesh/scripts/mesh.py)
+# [project.scripts]
+# the_mesh = "the_mesh.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/the-mesh/the-mesh"

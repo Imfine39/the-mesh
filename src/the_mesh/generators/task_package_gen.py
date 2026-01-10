@@ -20,7 +20,7 @@ import sys
 from the_mesh.generators.pytest_gen import PytestGenerator
 from the_mesh.generators.pytest_unit_gen import PytestUnitGenerator
 from the_mesh.generators.jest_gen import JestGenerator
-from the_mesh.generators.unit_test_gen import UnitTestGenerator
+from the_mesh.generators.jest_unit_gen import JestUnitGenerator
 from the_mesh.graph.graph import DependencyGraph
 from the_mesh.config.project import ProjectConfig
 
@@ -87,7 +87,7 @@ class TaskPackageGenerator:
                 files[f"at/{func_name}.at.test.{ext}"] = code
 
             # UT tests
-            ut_gen = UnitTestGenerator(self.spec, typescript=is_ts)
+            ut_gen = JestUnitGenerator(self.spec, typescript=is_ts)
             files[f"ut/unit.test.{ext}"] = ut_gen.generate_all()
 
         return files
@@ -559,9 +559,11 @@ class TaskPackageGenerator:
                 file_path.write_text(content)
                 files_created.append(str(file_path))
 
-            # Write implementation skeleton to src/
-            impl_path.write_text(impl_content)
-            files_created.append(str(impl_path))
+            # Write implementation skeleton to src/ (only if not exists)
+            if not impl_path.exists():
+                impl_path.write_text(impl_content)
+                files_created.append(str(impl_path))
+            # Existing implementation files are protected from overwrite
 
         return TaskPackageResult(
             success=True,

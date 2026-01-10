@@ -1,10 +1,13 @@
-"""Spec CRUD handlers for The Mesh MCP Server."""
+"""Spec CRUD handlers for The Mesh."""
 
 import copy
+from pathlib import Path
 from typing import Any
 
 from the_mesh.core.validator import MeshValidator
-from the_mesh.mcp.storage import SpecStorage
+from the_mesh.core.storage import SpecStorage
+from the_mesh.core.handlers.generation import compute_spec_changes, sync_after_change
+from the_mesh.config.project import ProjectConfig
 
 
 def spec_list(validator: MeshValidator, storage: SpecStorage, args: dict) -> dict:
@@ -46,14 +49,18 @@ def spec_read(validator: MeshValidator, storage: SpecStorage, args: dict) -> dic
 
 
 def spec_write(validator: MeshValidator, storage: SpecStorage, args: dict) -> dict:
-    """Write/create a spec file"""
+    """Write/create a spec file with automatic bundle sync"""
     spec = args["spec"]
     spec_id = args.get("spec_id") or spec.get("meta", {}).get("id")
     validate = args.get("validate", True)
     force = args.get("force", False)
+    no_sync = args.get("no_sync", False)
 
     if not spec_id:
         return {"success": False, "error": "No spec_id provided and meta.id missing"}
+
+    # Read previous spec for diff calculation (before backup)
+    previous_spec = storage.read_spec(spec_id)
 
     # Validate if requested
     validation_result = None
@@ -81,13 +88,41 @@ def spec_write(validator: MeshValidator, storage: SpecStorage, args: dict) -> di
     # Write spec
     path = storage.write_spec(spec, spec_id)
 
-    return {
+    result = {
         "success": True,
         "path": str(path),
         "spec_id": spec_id,
         "validation": validation_result,
         "backup_created": backup_created,
     }
+
+    # Auto-sync bundles if not disabled
+    if not no_sync:
+        changes = compute_spec_changes(previous_spec, spec)
+        if changes:
+            # Determine output directory from project config
+            spec_path = Path(path)
+            base_dir = spec_path.parent
+            project_config = ProjectConfig(base_dir)
+            config = project_config.load()
+            language = config.get("language", "python")
+
+            sync_result = sync_after_change(validator, storage, {
+                "spec": spec,
+                "changes": changes,
+                "language": language,
+                "output_dir": str(base_dir),
+            })
+            result["sync"] = {
+                "performed": True,
+                "changes_count": len(changes),
+                "updated_functions": sync_result.get("updated_functions", []),
+                "updated_tests": sync_result.get("updated_tests", []),
+            }
+        else:
+            result["sync"] = {"performed": False, "reason": "no_changes"}
+
+    return result
 
 
 def spec_delete(validator: MeshValidator, storage: SpecStorage, args: dict) -> dict:

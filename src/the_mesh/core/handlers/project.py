@@ -1,11 +1,11 @@
-"""Project configuration handlers for The Mesh MCP Server."""
+"""Project configuration handlers for The Mesh."""
 
 from pathlib import Path
 from typing import Any
 
 from the_mesh.core.validator import MeshValidator
 from the_mesh.config.project import ProjectConfig
-from the_mesh.mcp.storage import SpecStorage
+from the_mesh.core.storage import SpecStorage
 
 
 def init_project(validator: MeshValidator, storage: SpecStorage, args: dict) -> dict:
