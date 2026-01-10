@@ -15,7 +15,8 @@ venv/
 .mesh/
 
 # IDE / Editor
-.claude/
+.claude/*
+!.claude/skills/
 .vscode/
 .idea/
 *.swp
