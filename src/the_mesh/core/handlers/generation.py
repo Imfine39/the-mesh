@@ -253,16 +253,31 @@ def generate_tests(validator: MeshValidator, storage: SpecStorage, args: dict) -
         }
 
     # Generate tests
+    # State transition generators use generate_for_state_machine, not generate_for_function
+    is_state_framework = test_type == "state_transition"
+
     if function_name:
-        # Check if function exists
-        functions = spec.get("functions", {})
-        if function_name not in functions:
-            return {
-                "error": f"Function not found: {function_name}",
-                "available_functions": list(functions.keys())
-            }
-        code = generator.generate_for_function(function_name)
-        file_name = f"test_{function_name}.{file_ext}" if framework == "pytest" else f"{function_name}.test.{file_ext}"
+        if is_state_framework:
+            # For state frameworks, function_name is treated as state_machine name
+            state_machines = spec.get("stateMachines", {})
+            if function_name not in state_machines:
+                return {
+                    "error": f"State machine not found: {function_name}",
+                    "available_state_machines": list(state_machines.keys()),
+                    "hint": "For state transition tests, use state_machine name instead of function name"
+                }
+            code = generator.generate_for_state_machine(function_name)
+            file_name = f"test_state_{function_name}.{file_ext}" if framework.startswith("pytest") else f"{function_name}.state.test.{file_ext}"
+        else:
+            # Check if function exists
+            functions = spec.get("functions", {})
+            if function_name not in functions:
+                return {
+                    "error": f"Function not found: {function_name}",
+                    "available_functions": list(functions.keys())
+                }
+            code = generator.generate_for_function(function_name)
+            file_name = f"test_{function_name}.{file_ext}" if framework == "pytest" else f"{function_name}.test.{file_ext}"
     else:
         code = generator.generate_all()
 

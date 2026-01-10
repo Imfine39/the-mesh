@@ -194,6 +194,20 @@ All test types are generated for both Python (pytest) and JavaScript/TypeScript 
 - `jest-postcondition` / `jest-ts-postcondition` - PC
 - `jest-state` / `jest-ts-state` - ST
 
+**Note on State Transition Tests:**
+State transition tests are organized by state machine, not by function. When filtering:
+- For AT/UT/PC: Use `function_name` parameter to filter by function
+- For ST: Use `function_name` parameter to filter by **state_machine name**
+
+```python
+# Filter state transition tests by state machine name
+generate_tests(validator, storage, {
+    'spec_id': 'PROJECT_NAME',
+    'framework': 'pytest-state',
+    'function_name': 'OrderStateMachine'  # State machine name, not function
+})
+```
+
 ---
 
 ## Impact Analysis
