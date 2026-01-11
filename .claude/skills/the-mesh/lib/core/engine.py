@@ -81,14 +81,14 @@ class MeshEngine:
         description: str = ""
     ) -> ToolResult:
         """Create a new entity"""
-        if name in self.spec["state"]:
+        if name in self.spec["entities"]:
             return ToolResult(success=False, error=f"Entity '{name}' already exists")
 
         entity = {"fields": fields}
         if description:
             entity["description"] = description
 
-        self.spec["state"][name] = entity
+        self.spec["entities"][name] = entity
         self._dirty = True
         self._rebuild_graph()
 
@@ -103,14 +103,14 @@ class MeshEngine:
         description: str = ""
     ) -> ToolResult:
         """Add a field to an entity"""
-        if entity not in self.spec["state"]:
+        if entity not in self.spec["entities"]:
             return ToolResult(success=False, error=f"Entity '{entity}' does not exist")
 
         field_def = {"type": field_type, "required": required}
         if description:
             field_def["description"] = description
 
-        self.spec["state"][entity]["fields"][name] = field_def
+        self.spec["entities"][entity]["fields"][name] = field_def
         self._dirty = True
         self._rebuild_graph()
 
@@ -124,7 +124,7 @@ class MeshEngine:
         implements: list[str] | None = None
     ) -> ToolResult:
         """Create a new function"""
-        if name in self.spec["functions"]:
+        if name in self.spec["commands"]:
             return ToolResult(success=False, error=f"Function '{name}' already exists")
 
         func = {"input": input_fields}
@@ -133,7 +133,7 @@ class MeshEngine:
         if implements:
             func["implements"] = implements
 
-        self.spec["functions"][name] = func
+        self.spec["commands"][name] = func
         self._dirty = True
         self._rebuild_graph()
 
@@ -147,7 +147,7 @@ class MeshEngine:
         reason: str = ""
     ) -> ToolResult:
         """Add a precondition to a function"""
-        if function not in self.spec["functions"]:
+        if function not in self.spec["commands"]:
             return ToolResult(success=False, error=f"Function '{function}' does not exist")
 
         pre = {"expr": expr}
@@ -156,14 +156,14 @@ class MeshEngine:
         if reason:
             pre["reason"] = reason
 
-        if "pre" not in self.spec["functions"][function]:
-            self.spec["functions"][function]["pre"] = []
+        if "pre" not in self.spec["commands"][function]:
+            self.spec["commands"][function]["pre"] = []
 
-        self.spec["functions"][function]["pre"].append(pre)
+        self.spec["commands"][function]["pre"].append(pre)
         self._dirty = True
         self._rebuild_graph()
 
-        idx = len(self.spec["functions"][function]["pre"]) - 1
+        idx = len(self.spec["commands"][function]["pre"]) - 1
         return ToolResult(success=True, id=f"function:{function}.pre[{idx}]")
 
     def add_error_case(
@@ -175,21 +175,21 @@ class MeshEngine:
         http_status: int = 409
     ) -> ToolResult:
         """Add an error case to a function"""
-        if function not in self.spec["functions"]:
+        if function not in self.spec["commands"]:
             return ToolResult(success=False, error=f"Function '{function}' does not exist")
 
         error = {"code": code, "when": when, "http_status": http_status}
         if reason:
             error["reason"] = reason
 
-        if "error" not in self.spec["functions"][function]:
-            self.spec["functions"][function]["error"] = []
+        if "error" not in self.spec["commands"][function]:
+            self.spec["commands"][function]["error"] = []
 
-        self.spec["functions"][function]["error"].append(error)
+        self.spec["commands"][function]["error"].append(error)
         self._dirty = True
         self._rebuild_graph()
 
-        idx = len(self.spec["functions"][function]["error"]) - 1
+        idx = len(self.spec["commands"][function]["error"]) - 1
         return ToolResult(success=True, id=f"function:{function}.error[{idx}]")
 
     def add_post_action(
@@ -200,7 +200,7 @@ class MeshEngine:
         reason: str = ""
     ) -> ToolResult:
         """Add a post-action to a function"""
-        if function not in self.spec["functions"]:
+        if function not in self.spec["commands"]:
             return ToolResult(success=False, error=f"Function '{function}' does not exist")
 
         post = {"action": action}
@@ -209,14 +209,14 @@ class MeshEngine:
         if reason:
             post["reason"] = reason
 
-        if "post" not in self.spec["functions"][function]:
-            self.spec["functions"][function]["post"] = []
+        if "post" not in self.spec["commands"][function]:
+            self.spec["commands"][function]["post"] = []
 
-        self.spec["functions"][function]["post"].append(post)
+        self.spec["commands"][function]["post"].append(post)
         self._dirty = True
         self._rebuild_graph()
 
-        idx = len(self.spec["functions"][function]["post"]) - 1
+        idx = len(self.spec["commands"][function]["post"]) - 1
         return ToolResult(success=True, id=f"function:{function}.post[{idx}]")
 
     def create_derived(
@@ -312,11 +312,11 @@ class MeshEngine:
             return slice_info
 
         return {
-            "function": self.spec["functions"].get(function_name, {}),
+            "function": self.spec["commands"].get(function_name, {}),
             "entities": {
-                name: self.spec["state"][name]
+                name: self.spec["entities"][name]
                 for name in slice_info["entities"]
-                if name in self.spec["state"]
+                if name in self.spec["entities"]
             },
             "derived": {
                 name: self.spec["derived"][name]

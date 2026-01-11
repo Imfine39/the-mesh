@@ -1,0 +1,123 @@
+{
+  "function": "addToCart",
+  "function_def": {
+    "description": "商品をカートに追加",
+    "entity": "Cart",
+    "input": {
+      "cartId": {
+        "type": "string",
+        "required": true
+      },
+      "productId": {
+        "type": "string",
+        "required": true
+      },
+      "quantity": {
+        "type": "int",
+        "required": true,
+        "min": 1
+      }
+    },
+    "output": {
+      "cartItem": {
+        "type": "CartItem"
+      }
+    },
+    "pre": [
+      {
+        "expr": {
+          "type": "binary",
+          "op": "gt",
+          "left": {
+            "type": "input",
+            "field": "quantity"
+          },
+          "right": {
+            "type": "literal",
+            "value": 0
+          }
+        },
+        "reason": "数量は1以上を指定してください"
+      }
+    ],
+    "post": [
+      {
+        "id": "create_cart_item",
+        "action": {
+          "create": {
+            "target": "CartItem",
+            "data": {
+              "id": {
+                "type": "call",
+                "function": "generateId"
+              },
+              "cartId": {
+                "type": "input",
+                "field": "cartId"
+              },
+              "productId": {
+                "type": "input",
+                "field": "productId"
+              },
+              "quantity": {
+                "type": "input",
+                "field": "quantity"
+              },
+              "unitPrice": {
+                "type": "ref",
+                "path": "product.price"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "decrement_stock",
+        "action": {
+          "update": {
+            "target": "Product",
+            "id": {
+              "type": "input",
+              "field": "productId"
+            },
+            "set": {
+              "stock": {
+                "type": "binary",
+                "op": "sub",
+                "left": {
+                  "type": "self",
+                  "field": "stock"
+                },
+                "right": {
+                  "type": "input",
+                  "field": "quantity"
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "errors": [
+      {
+        "code": "INVALID_QUANTITY",
+        "status": 400,
+        "message": "数量が無効です"
+      },
+      {
+        "code": "OUT_OF_STOCK",
+        "status": 400,
+        "message": "在庫不足"
+      },
+      {
+        "code": "PRODUCT_NOT_FOUND",
+        "status": 404,
+        "message": "商品が見つかりません"
+      }
+    ]
+  },
+  "entities": {},
+  "derived": {},
+  "scenarios": {},
+  "invariants": []
+}

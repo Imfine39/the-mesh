@@ -46,8 +46,8 @@ class JestStateTransitionGenerator:
         self.spec = spec
         self.typescript = typescript
         self.state_machines = spec.get("stateMachines", {})
-        self.entities = spec.get("state", {})
-        self.functions = spec.get("functions", {})
+        self.entities = spec.get("entities", {})
+        self.functions = spec.get("commands", {})
         self.import_modules = import_modules or {}
 
     def _generate_imports(self, function_names: set[str]) -> list[str]:

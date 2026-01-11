@@ -82,7 +82,7 @@ class DependencyGraph:
         self._reverse_adjacency.clear()
 
         # Add entity nodes (first pass - create all entity nodes)
-        state = spec.get("state", {})
+        state = spec.get("entities", {})
         for name, entity in state.items():
             self._add_node(Node(
                 id=f"entity:{name}",
@@ -132,7 +132,7 @@ class DependencyGraph:
                     self._add_edge(Edge(node_id, f"derived:{dep}", "calls"))
 
         # Add function nodes
-        for name, func in spec.get("functions", {}).items():
+        for name, func in spec.get("commands", {}).items():
             node_id = f"function:{name}"
             self._add_node(Node(
                 id=node_id,
@@ -184,7 +184,14 @@ class DependencyGraph:
                 self._add_edge(Edge(node_id, f"function:{func_name}", "tests"))
 
             # Link to entities in given
-            for entity_name in scenario.get("given", {}).keys():
+            given = scenario.get("given", {})
+            # Support both dict format (legacy) and list format (new YAML)
+            if isinstance(given, dict):
+                entity_names = given.keys()
+            else:
+                # List format: [{"entity": "Product", ...}, {"entity": "Cart", ...}]
+                entity_names = [item.get("entity") for item in given if "entity" in item]
+            for entity_name in entity_names:
                 if f"entity:{entity_name}" in self.nodes:
                     self._add_edge(Edge(node_id, f"entity:{entity_name}", "uses"))
 

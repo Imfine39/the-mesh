@@ -42,8 +42,8 @@ class StateTransitionGenerator:
         """
         self.spec = spec
         self.state_machines = spec.get("stateMachines", {})
-        self.entities = spec.get("state", {})  # Note: "state" not "entities"
-        self.functions = spec.get("functions", {})
+        self.entities = spec.get("entities", {})  
+        self.functions = spec.get("commands", {})
         self.import_modules = import_modules or {}
 
     def generate_all(self) -> str:
@@ -72,10 +72,19 @@ class StateTransitionGenerator:
             # Build transition map: (from_state, trigger_function) -> transitions
             transition_map: dict[tuple[str, str], list[dict]] = {}
             for trans in transitions:
-                key = (trans.get("from"), trans.get("trigger_function"))
-                if key not in transition_map:
-                    transition_map[key] = []
-                transition_map[key].append(trans)
+                from_states = trans.get("from")
+                # Handle both single state (string) and multiple states (list)
+                if isinstance(from_states, list):
+                    for from_state in from_states:
+                        key = (from_state, trans.get("trigger_function"))
+                        if key not in transition_map:
+                            transition_map[key] = []
+                        transition_map[key].append(trans)
+                else:
+                    key = (from_states, trans.get("trigger_function"))
+                    if key not in transition_map:
+                        transition_map[key] = []
+                    transition_map[key].append(trans)
 
             # Generate valid transition tests
             for trans in transitions:
@@ -106,28 +115,34 @@ class StateTransitionGenerator:
     ) -> list[StateTransitionTest]:
         """Generate tests for valid state transitions"""
         tests = []
-        from_state = trans.get("from")
+        from_states = trans.get("from")
         to_state = trans.get("to")
         trigger = trans.get("trigger_function")
 
-        func_def = self.functions.get(trigger, {})
-        entity_data = self._get_entity_sample(entity, {field: from_state})
+        # Handle both single state (string) and multiple states (list)
+        if not isinstance(from_states, list):
+            from_states = [from_states]
 
-        tests.append(StateTransitionTest(
-            id=f"st_{sm_name}_{from_state}_to_{to_state}",
-            description=f"{entity}: {from_state} -> {to_state} via {trigger}",
-            state_machine=sm_name,
-            entity=entity,
-            field=field,
-            test_type="valid_transition",
-            from_state=from_state,
-            to_state=to_state,
-            trigger_function=trigger,
-            guard=trans.get("guard"),
-            initial_entity=entity_data,
-            inputs=self._get_function_inputs(func_def),
-            expected_state=to_state,
-        ))
+        func_def = self.functions.get(trigger, {})
+
+        for from_state in from_states:
+            entity_data = self._get_entity_sample(entity, {field: from_state})
+
+            tests.append(StateTransitionTest(
+                id=f"st_{sm_name}_{from_state}_to_{to_state}",
+                description=f"{entity}: {from_state} -> {to_state} via {trigger}",
+                state_machine=sm_name,
+                entity=entity,
+                field=field,
+                test_type="valid_transition",
+                from_state=from_state,
+                to_state=to_state,
+                trigger_function=trigger,
+                guard=trans.get("guard"),
+                initial_entity=entity_data,
+                inputs=self._get_function_inputs(func_def),
+                expected_state=to_state,
+            ))
 
         return tests
 
@@ -136,30 +151,36 @@ class StateTransitionGenerator:
     ) -> list[StateTransitionTest]:
         """Generate tests for guard condition failures"""
         tests = []
-        from_state = trans.get("from")
+        from_states = trans.get("from")
         to_state = trans.get("to")
         trigger = trans.get("trigger_function")
         guard = trans.get("guard")
 
-        func_def = self.functions.get(trigger, {})
-        entity_data = self._get_entity_sample(entity, {field: from_state})
+        # Handle both single state (string) and multiple states (list)
+        if not isinstance(from_states, list):
+            from_states = [from_states]
 
-        # Guard fail test - when guard is false, transition should not occur
-        tests.append(StateTransitionTest(
-            id=f"st_{sm_name}_{from_state}_guard_fail",
-            description=f"{entity}: guard fail at {from_state} - stays in {from_state}",
-            state_machine=sm_name,
-            entity=entity,
-            field=field,
-            test_type="guard_fail",
-            from_state=from_state,
-            to_state=to_state,
-            trigger_function=trigger,
-            guard=guard,
-            initial_entity=entity_data,
-            inputs=self._get_function_inputs(func_def),
-            expected_state=from_state,  # Should stay in from_state
-        ))
+        func_def = self.functions.get(trigger, {})
+
+        for from_state in from_states:
+            entity_data = self._get_entity_sample(entity, {field: from_state})
+
+            # Guard fail test - when guard is false, transition should not occur
+            tests.append(StateTransitionTest(
+                id=f"st_{sm_name}_{from_state}_guard_fail",
+                description=f"{entity}: guard fail at {from_state} - stays in {from_state}",
+                state_machine=sm_name,
+                entity=entity,
+                field=field,
+                test_type="guard_fail",
+                from_state=from_state,
+                to_state=to_state,
+                trigger_function=trigger,
+                guard=guard,
+                initial_entity=entity_data,
+                inputs=self._get_function_inputs(func_def),
+                expected_state=from_state,  # Should stay in from_state
+            ))
 
         return tests
 

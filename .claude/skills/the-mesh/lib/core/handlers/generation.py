@@ -103,7 +103,7 @@ def get_function_context(validator: MeshValidator, storage: SpecStorage, args: d
         return {"error": "One of spec, spec_path, or spec_id is required"}
 
     # Check if function exists
-    functions = spec.get("functions", {})
+    functions = spec.get("commands", {})
     if function_name not in functions:
         return {
             "error": f"Function not found: {function_name}",
@@ -129,7 +129,7 @@ def get_function_context(validator: MeshValidator, storage: SpecStorage, args: d
     }
 
     # Get entity definitions
-    state = spec.get("state", {})
+    state = spec.get("entities", {})
     for entity_name in slice_info.get("entities", []):
         if entity_name in state:
             result["entities"][entity_name] = state[entity_name]
@@ -270,7 +270,7 @@ def generate_tests(validator: MeshValidator, storage: SpecStorage, args: dict) -
             file_name = f"test_state_{function_name}.{file_ext}" if framework.startswith("pytest") else f"{function_name}.state.test.{file_ext}"
         else:
             # Check if function exists
-            functions = spec.get("functions", {})
+            functions = spec.get("commands", {})
             if function_name not in functions:
                 return {
                     "error": f"Function not found: {function_name}",
@@ -446,7 +446,7 @@ def sync_after_change(validator: MeshValidator, storage: SpecStorage, args: dict
     affected_functions = set(affected_functions_direct)
 
     # Functions that use affected entities
-    for func_name, func_def in spec.get("functions", {}).items():
+    for func_name, func_def in spec.get("commands", {}).items():
         # Check preconditions
         for pre in func_def.get("pre", []):
             if _expr_uses_entities(pre.get("check", {}), affected_entities):
@@ -477,7 +477,7 @@ def sync_after_change(validator: MeshValidator, storage: SpecStorage, args: dict
                     affected_functions.add(func_name)
 
     # Functions that use affected derived values
-    for func_name, func_def in spec.get("functions", {}).items():
+    for func_name, func_def in spec.get("commands", {}).items():
         for pre in func_def.get("pre", []):
             if _expr_uses_derived(pre.get("check", {}), affected_derived):
                 affected_functions.add(func_name)
@@ -522,7 +522,7 @@ def sync_after_change(validator: MeshValidator, storage: SpecStorage, args: dict
         "updated_tests": updated_tests,
         "updated_task_packages": updated_task_packages,
         "unchanged_functions": [
-            f for f in spec.get("functions", {}).keys()
+            f for f in spec.get("commands", {}).keys()
             if f not in affected_functions
         ]
     }

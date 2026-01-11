@@ -16,7 +16,7 @@ SAMPLE_SPEC = {
         "title": "Test System",
         "version": "1.0.0"
     },
-    "state": {
+    "entities": {
         "invoice": {
             "description": "Invoice entity",
             "fields": {
@@ -37,7 +37,7 @@ SAMPLE_SPEC = {
             }
         }
     },
-    "functions": {
+    "commands": {
         "create_invoice": {
             "description": "Create a new invoice",
             "input": {
@@ -198,7 +198,7 @@ class TestTypeScriptGeneratorEdgeCases:
     def test_nested_list_type(self):
         """Test nested list types (list of lists)"""
         spec = {
-            "state": {
+            "entities": {
                 "matrix": {
                     "fields": {
                         "rows": {"type": {"list": {"list": "int"}}, "required": True}
@@ -214,7 +214,7 @@ class TestTypeScriptGeneratorEdgeCases:
     def test_unknown_type(self):
         """Test handling of unknown types"""
         spec = {
-            "state": {
+            "entities": {
                 "test": {
                     "fields": {
                         "weird": {"type": "weird_type", "required": True}
@@ -230,7 +230,7 @@ class TestTypeScriptGeneratorEdgeCases:
     def test_function_without_output(self):
         """Test function without output definition"""
         spec = {
-            "functions": {
+            "commands": {
                 "delete_something": {
                     "input": {
                         "id": {"type": "string", "required": True}
@@ -247,7 +247,7 @@ class TestTypeScriptGeneratorEdgeCases:
     def test_function_without_input(self):
         """Test function without input definition"""
         spec = {
-            "functions": {
+            "commands": {
                 "get_all": {
                     "output": {
                         "items": {"type": {"list": "string"}, "required": True}

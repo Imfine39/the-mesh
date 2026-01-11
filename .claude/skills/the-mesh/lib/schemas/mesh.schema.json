@@ -89,6 +89,15 @@
       "type": "object",
       "properties": {
         "description": { "type": "string" },
+        "aggregateRoot": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this entity is an aggregate root (DDD)"
+        },
+        "parent": {
+          "type": "string",
+          "description": "Parent entity for non-aggregate-root entities"
+        },
         "fields": {
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/Field" }
@@ -318,7 +327,21 @@
         "id": { "type": "string" },
         "entity": { "type": "string" },
         "expr": { "$ref": "expression.schema.json" },
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "when": {
+          "$ref": "expression.schema.json",
+          "description": "Condition under which this invariant applies"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["error", "critical", "warning"],
+          "default": "error",
+          "description": "Severity level of invariant violation"
+        },
+        "violation": {
+          "type": "string",
+          "description": "Human-readable message when invariant is violated"
+        }
       },
       "required": ["id", "entity", "expr"],
       "additionalProperties": false
@@ -417,11 +440,24 @@
     "Transition": {
       "type": "object",
       "properties": {
-        "from": { "type": "string" },
+        "id": { "type": "string", "description": "Unique identifier for this transition" },
+        "from": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ],
+          "description": "Source state(s)"
+        },
         "to": { "type": "string" },
+        "trigger": {
+          "type": "string",
+          "enum": ["user", "external", "auto", "timer"],
+          "description": "Who/what triggers this transition: user (explicit action), external (system/webhook), auto (automatic), timer (scheduled)"
+        },
         "event": { "type": "string", "description": "Event name that triggers this transition" },
         "trigger_function": { "type": "string", "description": "Function that triggers this transition" },
         "guard": { "$ref": "expression.schema.json", "description": "Condition for transition" },
+        "error": { "type": "string", "description": "Error message when guard fails" },
         "actions": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["from", "to"],
@@ -1092,6 +1128,111 @@
       },
       "required": ["view"],
       "additionalProperties": false
+    },
+
+    "Query": {
+      "type": "object",
+      "description": "Read-only query definition",
+      "properties": {
+        "description": { "type": "string" },
+        "entity": { "type": "string", "description": "Primary entity to query" },
+        "filter": { "$ref": "expression.schema.json", "description": "Filter condition" },
+        "orderBy": {
+          "type": "object",
+          "properties": {
+            "field": { "type": "string" },
+            "direction": { "type": "string", "enum": ["asc", "desc"], "default": "asc" }
+          }
+        },
+        "pagination": {
+          "type": "object",
+          "properties": {
+            "defaultLimit": { "type": "integer", "default": 20 },
+            "maxLimit": { "type": "integer", "default": 100 }
+          }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Field" }
+        }
+      },
+      "required": ["entity"],
+      "additionalProperties": false
+    },
+
+    "TestStrategies": {
+      "type": "object",
+      "description": "Test generation configuration",
+      "properties": {
+        "coverage": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["full", "risk_based", "minimal"],
+              "default": "risk_based",
+              "description": "Test coverage mode"
+            },
+            "maxScenarios": { "type": "integer", "description": "Maximum scenarios to generate" },
+            "prioritize": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "severity": { "type": "array", "items": { "type": "string" } },
+                  "entities": { "type": "array", "items": { "type": "string" } },
+                  "presets": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "templates": {
+          "type": "object",
+          "properties": {
+            "boundary_values": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "targets": { "type": "array", "items": { "type": "string" } }
+              }
+            },
+            "state_transition": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "testTypes": {
+                  "type": "array",
+                  "items": { "type": "string", "enum": ["invalid_from_state", "final_state_exit", "guard_failure", "happy_path"] }
+                }
+              }
+            },
+            "idempotency": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": false },
+                "targets": { "type": "array", "items": { "type": "string" } }
+              }
+            },
+            "concurrency": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": false },
+                "targets": { "type": "array", "items": { "type": "string" } },
+                "parallelRequests": { "type": "integer", "default": 2 }
+              }
+            },
+            "authorization": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "targets": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
 
@@ -1111,17 +1252,24 @@
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/Requirement" }
     },
-    "state": {
+    "entities": {
       "type": "object",
+      "description": "Entity definitions",
       "additionalProperties": { "$ref": "#/$defs/Entity" }
     },
     "derived": {
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/DerivedFormula" }
     },
-    "functions": {
+    "commands": {
       "type": "object",
+      "description": "Command definitions (mutations that modify state)",
       "additionalProperties": { "$ref": "#/$defs/Function" }
+    },
+    "queries": {
+      "type": "object",
+      "description": "Query definitions (read-only operations)",
+      "additionalProperties": { "$ref": "#/$defs/Query" }
     },
     "scenarios": {
       "type": "object",
@@ -1205,8 +1353,12 @@
       "type": "object",
       "description": "Frontend route definitions (path -> route)",
       "additionalProperties": { "$ref": "#/$defs/Route" }
+    },
+    "testStrategies": {
+      "$ref": "#/$defs/TestStrategies",
+      "description": "Test generation configuration"
     }
   },
-  "required": ["meta", "state"],
+  "required": ["meta", "entities"],
   "additionalProperties": false
 }

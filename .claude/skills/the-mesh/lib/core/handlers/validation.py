@@ -177,7 +177,7 @@ def suggest_completion(validator: MeshValidator, storage: SpecStorage, args: dic
             "reason": "state is required"
         })
 
-    state = partial_spec.get("state", {})
+    state = partial_spec.get("entities", {})
 
     # Check SagaSteps for missing forward
     for saga_name, saga in state.get("sagas", {}).items():
@@ -190,12 +190,12 @@ def suggest_completion(validator: MeshValidator, storage: SpecStorage, args: dic
                 })
 
     # Check UpdateActions for missing target
-    for func_name, func in state.get("functions", {}).items():
+    for func_name, func in state.get("commands", {}).items():
         for i, post in enumerate(func.get("post", [])):
             action = post.get("action", {})
             if "update" in action and "target" not in action:
                 suggestions.append({
-                    "path": f"/state/functions/{func_name}/post/{i}/action/target",
+                    "path": f"/entities/commands/{func_name}/post/{i}/action/target",
                     "suggestion": {"type": "input", "name": "id"},
                     "reason": "UpdateAction requires 'target' field"
                 })
@@ -303,7 +303,7 @@ def check_reference(validator: MeshValidator, storage: SpecStorage, args: dict) 
     spec = args["spec"]
     reference = args["reference"]
 
-    state = spec.get("state", {})
+    state = spec.get("entities", {})
     entities = state.get("entities", {})
     derived = state.get("derived", {})
 
@@ -379,7 +379,7 @@ def get_entity_schema(validator: MeshValidator, storage: SpecStorage, args: dict
     spec = args["spec"]
     entity_name = args["entity_name"]
 
-    entities = spec.get("state", {}).get("entities", {})
+    entities = spec.get("entities", {}).get("entities", {})
 
     if entity_name not in entities:
         return {
@@ -427,7 +427,7 @@ def list_valid_values(validator: MeshValidator, storage: SpecStorage, args: dict
         return {"error": "field_path should be 'EntityName.fieldName'"}
 
     entity_name, field_name = parts
-    entities = spec.get("state", {}).get("entities", {})
+    entities = spec.get("entities", {}).get("entities", {})
 
     if entity_name not in entities:
         return {

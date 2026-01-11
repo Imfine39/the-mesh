@@ -26,8 +26,8 @@ class PolicyValidationMixin:
         errors = []
         warnings = []
         roles = spec.get("roles", {})
-        entities = spec.get("state", {})
-        functions = spec.get("functions", {})
+        entities = spec.get("entities", {})
+        functions = spec.get("commands", {})
 
         # Valid entity operations
         valid_operations = ["read", "create", "update", "delete", "list"]
@@ -111,7 +111,7 @@ class PolicyValidationMixin:
         """
         errors = []
         audit_policies = spec.get("auditPolicies", {})
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
 
         valid_operations = ["create", "update", "delete", "read"]
 
@@ -154,7 +154,7 @@ class PolicyValidationMixin:
         """
         errors = []
         policies = spec.get("dataPolicies", {})
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
 
         for policy_name, policy in policies.items():
             entity = policy.get("entity", "")

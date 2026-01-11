@@ -292,7 +292,7 @@ def suggest_completions(partial_spec: dict) -> list[dict]:
                 })
 
     # Check functions
-    for func_name, func in partial_spec.get("functions", {}).items():
+    for func_name, func in partial_spec.get("commands", {}).items():
         if not func.get("description"):
             suggestions.append({
                 "path": f"/functions/{func_name}/description",
@@ -342,7 +342,7 @@ def suggest_completions(partial_spec: dict) -> list[dict]:
             })
 
     # Check entities
-    for entity_name, entity in partial_spec.get("state", {}).items():
+    for entity_name, entity in partial_spec.get("entities", {}).items():
         if not entity.get("fields"):
             suggestions.append({
                 "path": f"/state/{entity_name}/fields",

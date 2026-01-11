@@ -10,7 +10,7 @@ class StateMachineValidationMixin:
         """Validate state machine definitions (VAL-003, VAL-004)"""
         errors = []
         warnings = []
-        functions = spec.get("functions", {})
+        functions = spec.get("commands", {})
         events = spec.get("events", {})
 
         for sm_name, sm in spec.get("stateMachines", {}).items():

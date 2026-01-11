@@ -14,10 +14,22 @@ Test frameworks:
     pytest-at       Acceptance tests (Python)
     pytest-pc       PostCondition tests (Python)
     pytest-st       State transition tests (Python)
+    pytest-idem     Idempotency tests (Python)
+    pytest-conc     Concurrency tests (Python)
+    pytest-authz    Authorization tests (Python)
+    pytest-empty    Empty/Null boundary tests (Python)
+    pytest-ref      Reference integrity tests (Python)
+    pytest-time     Temporal tests (Python)
     jest-ut         Unit tests (TypeScript)
     jest-at         Acceptance tests (TypeScript)
     jest-pc         PostCondition tests (TypeScript)
     jest-st         State transition tests (TypeScript)
+    jest-idem       Idempotency tests (TypeScript)
+    jest-conc       Concurrency tests (TypeScript)
+    jest-authz      Authorization tests (TypeScript)
+    jest-empty      Empty/Null boundary tests (TypeScript)
+    jest-ref        Reference integrity tests (TypeScript)
+    jest-time       Temporal tests (TypeScript)
 """
 import sys
 import json
@@ -42,8 +54,12 @@ def main():
     parser.add_argument("--function", "-fn", default=None,
                         help="Specific function to generate for")
     parser.add_argument("--output", "-o", default=None,
-                        help="Output file path")
+                        help="Output file path (default: output/<type>/)")
     args = parser.parse_args()
+
+    # Set default output directory based on type
+    script_dir = Path(__file__).parent.parent
+    default_output_dir = script_dir / "output"
 
     storage = SpecStorage()
     validator = MeshValidator()
@@ -81,11 +97,33 @@ def main():
     elif args.type == "task-package":
         output = generate_task_package(spec, args.function or "all")
 
+    # Determine output path
+    output_path = args.output
+    if not output_path:
+        # Set default output based on type
+        if args.type == "tests":
+            output_subdir = default_output_dir / "generated_tests"
+            output_subdir.mkdir(parents=True, exist_ok=True)
+            ext = ".py" if args.framework.startswith("pytest") else ".test.ts"
+            output_path = output_subdir / f"test_{args.framework.replace('-', '_')}{ext}"
+        elif args.type == "typescript":
+            output_subdir = default_output_dir / "generated_types"
+            output_subdir.mkdir(parents=True, exist_ok=True)
+            output_path = output_subdir / "types.ts"
+        elif args.type == "openapi":
+            output_subdir = default_output_dir / "generated_api"
+            output_subdir.mkdir(parents=True, exist_ok=True)
+            output_path = output_subdir / "openapi.json"
+        elif args.type == "zod":
+            output_subdir = default_output_dir / "generated_types"
+            output_subdir.mkdir(parents=True, exist_ok=True)
+            output_path = output_subdir / "schemas.ts"
+
     # Output
-    if args.output:
-        with open(args.output, "w") as f:
+    if output_path:
+        with open(output_path, "w") as f:
             f.write(output)
-        print(f"Written to {args.output}")
+        print(f"Written to {output_path}")
     else:
         print(output)
 
@@ -119,6 +157,30 @@ def generate_tests(spec: dict, framework: str, function_name: str | None) -> str
             from generators.python.state_transition_gen import StateTransitionGenerator
             gen = StateTransitionGenerator(spec)
             return gen.generate_all()
+        elif test_type == "idem":
+            from generators.python.idempotency_gen import IdempotencyTestGenerator
+            gen = IdempotencyTestGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "conc":
+            from generators.python.concurrency_gen import ConcurrencyTestGenerator
+            gen = ConcurrencyTestGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "authz":
+            from generators.python.authorization_gen import AuthorizationTestGenerator
+            gen = AuthorizationTestGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "empty":
+            from generators.python.empty_null_gen import EmptyNullTestGenerator
+            gen = EmptyNullTestGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "ref":
+            from generators.python.reference_integrity_gen import ReferenceIntegrityTestGenerator
+            gen = ReferenceIntegrityTestGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "time":
+            from generators.python.temporal_gen import TemporalTestGenerator
+            gen = TemporalTestGenerator(spec)
+            return gen.generate_all()
     elif lang == "jest":
         if test_type == "ut":
             from generators.typescript.jest_unit_gen import JestUnitGenerator
@@ -139,6 +201,30 @@ def generate_tests(spec: dict, framework: str, function_name: str | None) -> str
         elif test_type == "st":
             from generators.typescript.jest_state_transition_gen import JestStateTransitionGenerator
             gen = JestStateTransitionGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "idem":
+            from generators.typescript.jest_idempotency_gen import JestIdempotencyGenerator
+            gen = JestIdempotencyGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "conc":
+            from generators.typescript.jest_concurrency_gen import JestConcurrencyGenerator
+            gen = JestConcurrencyGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "authz":
+            from generators.typescript.jest_authorization_gen import JestAuthorizationGenerator
+            gen = JestAuthorizationGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "empty":
+            from generators.typescript.jest_empty_null_gen import JestEmptyNullGenerator
+            gen = JestEmptyNullGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "ref":
+            from generators.typescript.jest_reference_integrity_gen import JestReferenceIntegrityGenerator
+            gen = JestReferenceIntegrityGenerator(spec)
+            return gen.generate_all()
+        elif test_type == "time":
+            from generators.typescript.jest_temporal_gen import JestTemporalGenerator
+            gen = JestTemporalGenerator(spec)
             return gen.generate_all()
 
     return f"// Unknown framework: {framework}"

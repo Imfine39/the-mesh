@@ -16,7 +16,7 @@ SAMPLE_SPEC = {
         "title": "Test System",
         "version": "1.0.0"
     },
-    "state": {
+    "entities": {
         "invoice": {
             "description": "Invoice entity",
             "fields": {
@@ -37,7 +37,7 @@ SAMPLE_SPEC = {
             }
         }
     },
-    "functions": {
+    "commands": {
         "create_invoice": {
             "description": "Create a new invoice",
             "input": {
@@ -252,7 +252,7 @@ class TestZodGeneratorEdgeCases:
     def test_function_without_input(self):
         """Test function without input definition"""
         spec = {
-            "functions": {
+            "commands": {
                 "get_status": {
                     "description": "Get status"
                 }
@@ -266,7 +266,7 @@ class TestZodGeneratorEdgeCases:
     def test_function_without_pre(self):
         """Test function without pre conditions"""
         spec = {
-            "functions": {
+            "commands": {
                 "simple_action": {
                     "input": {
                         "id": {"type": "string", "required": True}
@@ -284,7 +284,7 @@ class TestZodGeneratorEdgeCases:
     def test_datetime_type(self):
         """Test datetime type conversion"""
         spec = {
-            "state": {
+            "entities": {
                 "event": {
                     "fields": {
                         "created_at": {"type": "datetime", "required": True}
@@ -300,7 +300,7 @@ class TestZodGeneratorEdgeCases:
     def test_text_type(self):
         """Test text type conversion"""
         spec = {
-            "state": {
+            "entities": {
                 "note": {
                     "fields": {
                         "content": {"type": "text", "required": True}
@@ -317,7 +317,7 @@ class TestZodGeneratorEdgeCases:
     def test_binary_expression_field_vs_field(self):
         """Test refinement for comparing two input fields"""
         spec = {
-            "functions": {
+            "commands": {
                 "transfer": {
                     "input": {
                         "start_date": {"type": "string", "required": True},
@@ -345,7 +345,7 @@ class TestZodGeneratorEdgeCases:
     def test_aggregation_requires_server_side(self):
         """Test that aggregation expressions require server-side validation"""
         spec = {
-            "functions": {
+            "commands": {
                 "check_count": {
                     "input": {
                         "limit": {"type": "int", "required": True}
@@ -373,7 +373,7 @@ class TestZodGeneratorEdgeCases:
     def test_unknown_type_handling(self):
         """Test handling of unknown types"""
         spec = {
-            "state": {
+            "entities": {
                 "test": {
                     "fields": {
                         "weird": {"type": "weird_type", "required": True}

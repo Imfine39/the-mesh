@@ -74,8 +74,8 @@ def generate_typescript_types(validator: MeshValidator, storage: SpecStorage, ar
         path.write_text(code)
 
     # Count generated types
-    entities = spec.get("state", {})
-    functions = spec.get("functions", {})
+    entities = spec.get("entities", {})
+    functions = spec.get("commands", {})
 
     return {
         "success": True,
@@ -199,8 +199,8 @@ def generate_zod_schemas(validator: MeshValidator, storage: SpecStorage, args: d
         path.write_text(code)
 
     # Count generated schemas
-    entities = spec.get("state", {})
-    functions = spec.get("functions", {})
+    entities = spec.get("entities", {})
+    functions = spec.get("commands", {})
 
     # Count refinements (pre conditions that can be converted to Zod refinements)
     refinement_count = 0
@@ -298,8 +298,8 @@ def generate_all_frontend(validator: MeshValidator, storage: SpecStorage, args: 
         "errors": errors if errors else None,
         "stats": {
             "files_generated": len(generated_files),
-            "entities": len(spec.get("state", {})),
-            "functions": len(spec.get("functions", {}))
+            "entities": len(spec.get("entities", {})),
+            "functions": len(spec.get("commands", {}))
         }
     }
 

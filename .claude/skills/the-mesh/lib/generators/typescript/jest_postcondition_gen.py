@@ -1,417 +1,483 @@
 """Mesh Post-Condition Test Generator for Jest
 
-Generates EXECUTABLE Jest tests to verify function post-conditions using Repository pattern:
-- Entity creation (create actions) - verifies repository.create() called correctly
-- Entity updates (update actions) - verifies repository.update() called correctly
-- Entity deletion (delete actions) - verifies repository.delete() called correctly
-
-Tests use mock repositories - implementation must accept repository parameter.
+specの定義（ref, parent等）を使用して依存関係を正しく解決する。
+命名規則からの推測ではなく、specの明示的な定義を優先。
 """
 
 from typing import Any
 from dataclasses import dataclass
 
+from ..spec_utils import (
+    SpecAnalyzer,
+    TestDataGenerator,
+    MockContextGenerator,
+    GenerationMarker,
+)
+
 
 @dataclass
 class PostConditionTest:
-    """Represents a single post-condition test case"""
+    """Post-condition テストケース"""
     id: str
     description: str
-    function: str
+    command: str
     action_type: str  # 'create', 'update', 'delete'
     target_entity: str
     inputs: dict[str, Any]
     expected_fields: dict[str, Any]
-    existing_entity: dict[str, Any] | None
+    required_context: list[dict]  # 依存エンティティのセットアップ
+    generation_type: str  # 'auto', 'template', 'manual'
+    todo_reason: str | None = None
 
 
 class JestPostConditionGenerator:
-    """Generates executable Jest post-condition tests from TRIR specification"""
+    """Post-condition テストジェネレーター"""
 
-    def __init__(self, spec: dict[str, Any], typescript: bool = True,
-                 import_modules: dict[str, str] | None = None):
-        """
-        Args:
-            spec: TRIR specification
-            typescript: Whether to generate TypeScript (True) or JavaScript (False)
-            import_modules: Map of function_name -> module path
-                           e.g. {"createOrder": "./src/orders/createOrder"}
-        """
+    def __init__(self, spec: dict[str, Any]):
         self.spec = spec
-        self.functions = spec.get("functions", {})
-        self.entities = spec.get("state", {})  # Note: "state" not "entities"
-        self.typescript = typescript
-        self.import_modules = import_modules or {}
-
-    def _generate_imports(self, function_names: set[str]) -> list[str]:
-        """Generate import statements for functions (grouped by module)"""
-        lines = []
-        module_funcs: dict[str, list[str]] = {}
-        for func_name in sorted(function_names):
-            module = self.import_modules.get(func_name)
-            if module:
-                if module not in module_funcs:
-                    module_funcs[module] = []
-                module_funcs[module].append(func_name)
-
-        for module, funcs in sorted(module_funcs.items()):
-            funcs_str = ", ".join(sorted(funcs))
-            lines.append(f"import {{ {funcs_str} }} from '{module}';")
-        return lines
+        self.analyzer = SpecAnalyzer(spec)
+        self.data_gen = TestDataGenerator(self.analyzer)
+        self.mock_gen = MockContextGenerator(self.analyzer)
 
     def generate_all(self) -> str:
-        """Generate all post-condition tests"""
-        tests = self._generate_tests()
-        return self._render_jest(tests)
+        """全コマンドのpost-conditionテストを生成"""
+        tests = self._collect_tests()
+        return self._render(tests)
 
-    def generate_for_function(self, func_name: str) -> str:
-        """Generate post-condition tests for a specific function"""
-        tests = self._generate_tests(func_filter=func_name)
-        return self._render_jest(tests)
+    def generate_for_command(self, command_name: str) -> str:
+        """特定コマンドのpost-conditionテストを生成"""
+        tests = self._collect_tests(command_filter=command_name)
+        return self._render(tests)
 
-    def _generate_tests(self, func_filter: str | None = None) -> list[PostConditionTest]:
-        """Generate test cases from spec"""
+    def _collect_tests(self, command_filter: str | None = None) -> list[PostConditionTest]:
+        """specからテストケースを収集"""
         tests = []
 
-        for func_name, func_def in self.functions.items():
-            if func_filter and func_name != func_filter:
+        for cmd_name, cmd_info in self.analyzer.get_all_commands().items():
+            if command_filter and cmd_name != command_filter:
                 continue
 
-            posts = func_def.get("post", [])
-            for i, post in enumerate(posts):
+            for i, post in enumerate(cmd_info.post_actions):
                 action = post.get("action", {})
 
                 if "create" in action:
-                    tests.append(self._generate_create_test(
-                        func_name, func_def, action, i
-                    ))
+                    tests.append(self._create_test_for_create(cmd_name, cmd_info, action, i))
                 elif "update" in action:
-                    tests.append(self._generate_update_test(
-                        func_name, func_def, action, i
-                    ))
+                    tests.append(self._create_test_for_update(cmd_name, cmd_info, action, i))
                 elif "delete" in action:
-                    tests.append(self._generate_delete_test(
-                        func_name, func_def, action, i
-                    ))
+                    tests.append(self._create_test_for_delete(cmd_name, cmd_info, action, i))
 
         return tests
 
-    def _generate_create_test(
-        self, func_name: str, func_def: dict, action: dict, index: int
-    ) -> PostConditionTest:
-        """Generate test for create action"""
-        entity_name = action["create"]
-        with_values = action.get("with", {})
+    def _create_test_for_create(self, cmd_name: str, cmd_info, action: dict, index: int) -> PostConditionTest:
+        """create アクションのテストを作成"""
+        create_def = action["create"]
+        target_entity = create_def.get("target") if isinstance(create_def, dict) else create_def
+        data_def = create_def.get("data", {}) if isinstance(create_def, dict) else {}
 
-        expected_fields = {}
-        for field_name, value_expr in with_values.items():
-            expected_fields[field_name] = self._expr_to_input_ref(value_expr)
+        # 期待されるフィールドを解析（target_entityを渡してderived判定に使用）
+        expected_fields, generation_type, todo_reason = self._analyze_expected_fields(data_def, target_entity)
+
+        # 入力サンプルを生成
+        inputs = self.data_gen.generate_input_sample(cmd_name)
+
+        # 依存エンティティを生成（specのref/parentを使用）
+        required_context = self._generate_required_context(cmd_name, target_entity)
 
         return PostConditionTest(
-            id=f"pc-{func_name}-creates-{self._to_kebab(entity_name)}",
-            description=f"{func_name}: should create {entity_name} with specified fields",
-            function=func_name,
+            id=f"pc-{cmd_name}-creates-{target_entity.lower()}",
+            description=f"{cmd_name}: should create {target_entity} with specified fields",
+            command=cmd_name,
             action_type="create",
-            target_entity=entity_name,
-            inputs=self._get_sample_inputs(func_def),
+            target_entity=target_entity,
+            inputs=inputs,
             expected_fields=expected_fields,
-            existing_entity=None,
+            required_context=required_context,
+            generation_type=generation_type,
+            todo_reason=todo_reason,
         )
 
-    def _generate_update_test(
-        self, func_name: str, func_def: dict, action: dict, index: int
-    ) -> PostConditionTest:
-        """Generate test for update action"""
-        entity_name = action["update"]
-        set_values = action.get("set", {})
+    def _create_test_for_update(self, cmd_name: str, cmd_info, action: dict, index: int) -> PostConditionTest:
+        """update アクションのテストを作成"""
+        update_def = action["update"]
+        target_entity = update_def.get("target") if isinstance(update_def, dict) else update_def
+        set_def = update_def.get("set", {}) if isinstance(update_def, dict) else {}
 
-        expected_fields = {}
-        for field_name, value_expr in set_values.items():
-            expected_fields[field_name] = self._expr_to_input_ref(value_expr)
+        expected_fields, generation_type, todo_reason = self._analyze_expected_fields(set_def, target_entity)
+        inputs = self.data_gen.generate_input_sample(cmd_name)
+        required_context = self._generate_required_context(cmd_name, target_entity, include_target=True)
 
         return PostConditionTest(
-            id=f"pc-{func_name}-updates-{self._to_kebab(entity_name)}",
-            description=f"{func_name}: should update {entity_name} with specified fields",
-            function=func_name,
+            id=f"pc-{cmd_name}-updates-{target_entity.lower()}",
+            description=f"{cmd_name}: should update {target_entity} with specified fields",
+            command=cmd_name,
             action_type="update",
-            target_entity=entity_name,
-            inputs=self._get_sample_inputs(func_def),
+            target_entity=target_entity,
+            inputs=inputs,
             expected_fields=expected_fields,
-            existing_entity=self._get_entity_sample(entity_name),
+            required_context=required_context,
+            generation_type=generation_type,
+            todo_reason=todo_reason,
         )
 
-    def _generate_delete_test(
-        self, func_name: str, func_def: dict, action: dict, index: int
-    ) -> PostConditionTest:
-        """Generate test for delete action"""
-        entity_name = action["delete"]
+    def _create_test_for_delete(self, cmd_name: str, cmd_info, action: dict, index: int) -> PostConditionTest:
+        """delete アクションのテストを作成"""
+        delete_def = action["delete"]
+        target_entity = delete_def.get("target") if isinstance(delete_def, dict) else delete_def
+
+        inputs = self.data_gen.generate_input_sample(cmd_name)
+        required_context = self._generate_required_context(cmd_name, target_entity, include_target=True)
 
         return PostConditionTest(
-            id=f"pc-{func_name}-deletes-{self._to_kebab(entity_name)}",
-            description=f"{func_name}: should delete {entity_name}",
-            function=func_name,
+            id=f"pc-{cmd_name}-deletes-{target_entity.lower()}",
+            description=f"{cmd_name}: should delete {target_entity}",
+            command=cmd_name,
             action_type="delete",
-            target_entity=entity_name,
-            inputs=self._get_sample_inputs(func_def),
+            target_entity=target_entity,
+            inputs=inputs,
             expected_fields={},
-            existing_entity=self._get_entity_sample(entity_name),
+            required_context=required_context,
+            generation_type=GenerationMarker.AUTO,
+            todo_reason=None,
         )
 
-    def _expr_to_input_ref(self, expr: dict) -> str | Any:
-        """Convert expression to input reference or literal"""
-        if not isinstance(expr, dict):
-            return expr
+    def _analyze_expected_fields(self, data_def: dict, target_entity: str = "") -> tuple[dict, str, str | None]:
+        """期待されるフィールドを解析
 
-        expr_type = expr.get("type")
+        Returns:
+            (expected_fields, generation_type, todo_reason)
+        """
+        expected = {}
+        has_complex_expr = False
+        complex_fields = []
+        derived_fields = []
 
-        if expr_type == "literal":
-            return expr.get("value")
-        elif expr_type == "input":
-            return f"$input.{expr.get('name')}"
-        else:
-            return "$expr"
+        for field_name, expr in data_def.items():
+            # derivedフィールドかチェック
+            if target_entity and self.analyzer.is_derived_field(target_entity, field_name):
+                derived_info = self.analyzer.get_derived_info(target_entity, field_name)
+                if derived_info and self.analyzer.is_simple_formula(derived_info.formula):
+                    # シンプルな計算式は検証可能
+                    expected[field_name] = {
+                        "type": "derived_simple",
+                        "formula": derived_info.formula
+                    }
+                else:
+                    # 複雑な計算式（集約など）は存在のみ検証
+                    expected[field_name] = {"type": "derived_complex"}
+                    derived_fields.append(field_name)
+                continue
 
-    def _get_sample_inputs(self, func_def: dict) -> dict:
-        """Get sample inputs for a function"""
-        inputs = {}
-        input_schema = func_def.get("input", {})
-        for field_name, field_def in input_schema.items():
-            inputs[field_name] = self._get_default_value(field_name, field_def.get("type"))
-        return inputs
+            if not isinstance(expr, dict):
+                expected[field_name] = {"type": "literal", "value": expr}
+                continue
 
-    def _get_entity_sample(self, entity_name: str) -> dict:
-        """Get sample data for an entity"""
-        entity = self.entities.get(entity_name, {})
-        sample = {"id": f"{entity_name.upper()}-001"}
-        for field_name, field_def in entity.get("fields", {}).items():
-            if field_name != "id":
-                sample[field_name] = self._get_default_value(field_name, field_def.get("type"))
-        return sample
+            expr_type = expr.get("type")
 
-    def _get_default_value(self, field_name: str, field_type: Any) -> Any:
-        """Get default value for a field type"""
-        if isinstance(field_type, str):
-            if field_type == "string":
-                return f"{field_name.upper()}-001"
-            defaults = {
-                "text": "test content",
-                "int": 100,
-                "float": 100.0,
-                "bool": True,
-                "datetime": "2024-01-01T00:00:00Z",
-                "date": "2024-01-01",
-            }
-            return defaults.get(field_type, "test")
-        if isinstance(field_type, dict):
-            if "enum" in field_type:
-                return field_type["enum"][0]
-            if "ref" in field_type:
-                return "REF-001"
-        return None
+            if expr_type == "literal":
+                expected[field_name] = {"type": "literal", "value": expr.get("value")}
 
-    def _render_jest(self, tests: list[PostConditionTest]) -> str:
-        """Render tests as executable Jest code"""
-        # Collect functions used
-        used_functions = {t.function for t in tests}
+            elif expr_type == "input":
+                field = expr.get("field") or expr.get("name")
+                expected[field_name] = {"type": "input", "field": field}
 
+            elif expr_type in ("call", "binary", "ref"):
+                # 計算式や参照は値の検証が困難
+                expected[field_name] = {"type": "exists_only"}
+                has_complex_expr = True
+                complex_fields.append(field_name)
+
+            else:
+                expected[field_name] = {"type": "exists_only"}
+                has_complex_expr = True
+                complex_fields.append(field_name)
+
+        if has_complex_expr or derived_fields:
+            reasons = []
+            if complex_fields:
+                reasons.append(f"complex expressions: {', '.join(complex_fields)}")
+            if derived_fields:
+                reasons.append(f"derived fields (aggregation): {', '.join(derived_fields)}")
+            return (
+                expected,
+                GenerationMarker.TEMPLATE,
+                " | ".join(reasons)
+            )
+
+        return expected, GenerationMarker.AUTO, None
+
+    def _generate_required_context(
+        self,
+        cmd_name: str,
+        target_entity: str,
+        include_target: bool = False
+    ) -> list[dict]:
+        """テスト実行に必要なコンテキストを生成
+
+        specのref/parent情報を使用して依存関係を解決
+        """
+        context = []
+        setup_entities = set()
+
+        # ターゲットエンティティを最初にセットアップ（update/delete）
+        # これにより is_target フラグが確実に付与される
+        if include_target:
+            entity_sample = self.data_gen.generate_entity_sample(target_entity)
+            context.append({
+                "entity": target_entity,
+                "data": entity_sample,
+                "is_target": True,
+            })
+            setup_entities.add(target_entity)
+
+            # ターゲットが参照するエンティティも追加
+            target_refs = self.analyzer.get_entity_references(target_entity)
+            for field_name, ref_entity in target_refs:
+                if ref_entity not in setup_entities:
+                    ref_sample = self.data_gen.generate_entity_sample(ref_entity)
+                    context.append({
+                        "entity": ref_entity,
+                        "data": ref_sample,
+                    })
+                    setup_entities.add(ref_entity)
+
+        # コマンドの入力から参照されるエンティティ
+        command = self.analyzer.get_command(cmd_name)
+        if command:
+            for field_name, field_info in command.inputs.items():
+                # 明示的なrefか、xxxIdパターンからの推論
+                ref_entity = field_info.ref
+                if not ref_entity:
+                    ref_entity = self.data_gen._infer_reference(field_name)
+
+                if ref_entity and ref_entity not in setup_entities:
+                    entity_sample = self.data_gen.generate_entity_sample(ref_entity)
+                    context.append({
+                        "entity": ref_entity,
+                        "data": entity_sample,
+                    })
+                    setup_entities.add(ref_entity)
+
+                    # 子エンティティも追加（親エンティティの場合）
+                    parent_entity = self.analyzer.get_entity(ref_entity)
+                    if parent_entity:
+                        for child_name in parent_entity.children:
+                            if child_name not in setup_entities:
+                                child_sample = self.data_gen.generate_entity_sample(child_name)
+                                context.append({
+                                    "entity": child_name,
+                                    "data": child_sample,
+                                })
+                                setup_entities.add(child_name)
+
+        return context
+
+    def _render(self, tests: list[PostConditionTest]) -> str:
+        """テストコードを生成"""
         lines = [
-            '/**',
-            ' * Auto-generated Post-Condition Tests from TRIR specification',
-            ' *',
-            ' * These tests verify that function implementations actually perform',
-            ' * the side effects (create/update/delete) specified in the spec.',
-            ' *',
-            ' * Tests use mock repositories - implementation must accept repository parameter.',
-            ' * @generated',
-            ' */',
-            '',
+            "// @ts-nocheck",
+            "/**",
+            " * Auto-generated Post-Condition Tests from TRIR specification",
+            " *",
+            " * Tests verify that function implementations perform",
+            " * the side effects (create/update/delete) specified in the spec.",
+            " *",
+            " * @generated by the-mesh",
+            " */",
+            "",
+            "import { describe, it, expect, jest, beforeEach } from '@jest/globals';",
+            "",
         ]
 
-        # Jest imports
-        if self.typescript:
-            lines.append("import { describe, it, expect } from '@jest/globals';")
+        # Import implementations
+        commands = {t.command for t in tests}
+        for cmd in sorted(commands):
+            lines.append(f"import {{ {cmd} }} from '../../../src/{cmd}';")
+        lines.append("")
 
-        # Implementation imports
-        impl_imports = self._generate_imports(used_functions)
-        if impl_imports:
-            lines.append('')
-            lines.append('// Implementation imports')
-            lines.extend(impl_imports)
-        lines.append('')
+        # MockContext interface and factory
+        lines.append("// ========== Mock Context ==========")
+        lines.append("")
+        lines.append(self.mock_gen.generate_interface())
+        lines.append("")
+        lines.append(self.mock_gen.generate_factory())
+        lines.append("")
 
-        # Collect all entities used
-        entities_used = set()
+        # Group tests by command
+        by_command: dict[str, list[PostConditionTest]] = {}
         for test in tests:
-            entities_used.add(test.target_entity)
-
-        # Generate TypeScript interfaces if needed
-        if self.typescript:
-            lines.append('// ========== Repository Interfaces ==========')
-            lines.append('')
-            for entity_name in sorted(entities_used):
-                lines.extend(self._generate_repository_interface(entity_name))
-                lines.append('')
-
-        # Generate mock factory
-        lines.append('// ========== Mock Factories ==========')
-        lines.append('')
-        for entity_name in sorted(entities_used):
-            lines.extend(self._generate_mock_factory(entity_name))
-            lines.append('')
-
-        # Group tests by function
-        by_function: dict[str, list[PostConditionTest]] = {}
-        for test in tests:
-            if test.function not in by_function:
-                by_function[test.function] = []
-            by_function[test.function].append(test)
+            if test.command not in by_command:
+                by_command[test.command] = []
+            by_command[test.command].append(test)
 
         # Generate test suites
-        lines.append('// ========== Post-Condition Tests ==========')
-        lines.append('')
+        lines.append("// ========== Post-Condition Tests ==========")
+        lines.append("")
 
-        for func_name, func_tests in by_function.items():
-            lines.append(f"describe('PostCondition: {func_name}', () => {{")
+        for cmd_name, cmd_tests in by_command.items():
+            lines.append(f"describe('PostCondition: {cmd_name}', () => {{")
+            lines.append("  let ctx: ReturnType<typeof createMockContext>;")
+            lines.append("")
+            lines.append("  beforeEach(() => {")
+            lines.append("    ctx = createMockContext();")
+            lines.append("  });")
 
-            for test in func_tests:
+            for test in cmd_tests:
                 lines.extend(self._render_test(test))
 
-            lines.append('});')
-            lines.append('')
+            lines.append("});")
+            lines.append("")
 
-        return '\n'.join(lines)
-
-    def _generate_repository_interface(self, entity_name: str) -> list[str]:
-        """Generate TypeScript interface for repository"""
-        return [
-            f'interface {entity_name}Repository {{',
-            f'  create(data: Partial<{entity_name}>): Promise<{entity_name}>;',
-            f'  get(id: string): Promise<{entity_name} | null>;',
-            f'  getAll(): Promise<{entity_name}[]>;',
-            f'  update(id: string, data: Partial<{entity_name}>): Promise<{entity_name}>;',
-            f'  delete(id: string): Promise<boolean>;',
-            '}',
-            '',
-            f'interface {entity_name} {{',
-            f'  id: string;',
-            f'  [key: string]: unknown;',
-            '}',
-        ]
-
-    def _generate_mock_factory(self, entity_name: str) -> list[str]:
-        """Generate mock repository factory"""
-        type_hint = f': {entity_name}Repository' if self.typescript else ''
-        data_type = f': Record<string, {entity_name}>' if self.typescript else ''
-
-        return [
-            f'function createMock{entity_name}Repository(){type_hint} {{',
-            f'  const mockData{data_type} = {{}};',
-            f'  return {{',
-            f'    create: jest.fn().mockImplementation((data) => Promise.resolve({{ id: "NEW-001", ...data }})),',
-            f'    get: jest.fn().mockImplementation((id) => Promise.resolve(mockData[id] || null)),',
-            f'    getAll: jest.fn().mockResolvedValue([]),',
-            f'    update: jest.fn().mockImplementation((id, data) => Promise.resolve({{ ...mockData[id], ...data }})),',
-            f'    delete: jest.fn().mockResolvedValue(true),',
-            f'    _setData: (id{": string" if self.typescript else ""}, data{f": {entity_name}" if self.typescript else ""}) => {{ mockData[id] = data; }},',
-            f'  }};',
-            '}',
-        ]
+        return "\n".join(lines)
 
     def _render_test(self, test: PostConditionTest) -> list[str]:
-        """Render a single test"""
+        """単一のテストを生成"""
         lines = []
-        entity_name = test.target_entity
+        repo_name = f"{test.target_entity[0].lower()}{test.target_entity[1:]}Repository"
 
-        lines.append('')
+        # Generation marker
+        marker = GenerationMarker.format_marker(test.generation_type, test.todo_reason)
+        lines.append("")
+        lines.append(f"  {marker}")
+
+        if test.generation_type == GenerationMarker.TEMPLATE:
+            lines.append(f"  {GenerationMarker.format_todo(test.todo_reason or 'Manual implementation required')}")
+
         lines.append(f"  it('{test.description}', async () => {{")
 
         # Arrange
-        lines.append('    // Arrange')
-        lines.append(f'    const repository = createMock{entity_name}Repository();')
-        lines.append(f'    const inputData = {self._to_js_object(test.inputs)};')
+        lines.append("    // Arrange")
+        lines.append(f"    const inputData = {self._to_js(test.inputs)};")
 
-        if test.existing_entity:
-            lines.append(f'    const existing = {self._to_js_object(test.existing_entity)};')
-            lines.append(f'    repository._setData(existing.id, existing);')
-            lines.append(f'    repository.get.mockResolvedValue(existing);')
+        # Context setup (依存エンティティ)
+        for ctx_item in test.required_context:
+            entity = ctx_item["entity"]
+            data = ctx_item["data"]
+            is_target = ctx_item.get("is_target", False)
 
-        lines.append('')
+            if is_target:
+                lines.append(f"    const existing = {self._to_js(data)};")
+                lines.append(f"    ctx._set{entity}(existing);")
+            else:
+                lines.append(f"    ctx._set{entity}({self._to_js(data)});")
+
+        lines.append("")
 
         # Act
-        has_import = test.function in self.import_modules
-        comment = "" if has_import else "// "
-
-        lines.append('    // Act')
-        lines.append(f'    {comment}const result = await {test.function}(inputData, {{ repository }});')
-        lines.append('')
+        lines.append("    // Act")
+        lines.append(f"    await {test.command}(inputData, ctx);")
+        lines.append("")
 
         # Assert
-        lines.append('    // Assert')
+        lines.append("    // Assert")
+        lines.extend(self._render_assertions(test, repo_name))
 
-        if test.action_type == "create":
-            lines.append('    expect(repository.create).toHaveBeenCalledTimes(1);')
-            lines.append('    const callArgs = repository.create.mock.calls[0][0];')
-            lines.append('')
-
-            for field, expected in test.expected_fields.items():
-                if isinstance(expected, str) and expected.startswith("$input."):
-                    input_field = expected[7:]
-                    lines.append(f'    expect(callArgs).toHaveProperty("{field}");')
-                    lines.append(f'    expect(callArgs.{field}).toBe(inputData.{input_field});')
-                else:
-                    lines.append(f'    expect(callArgs).toHaveProperty("{field}");')
-                    lines.append(f'    expect(callArgs.{field}).toBe({self._to_js_value(expected)});')
-
-        elif test.action_type == "update":
-            lines.append('    expect(repository.update).toHaveBeenCalledTimes(1);')
-            lines.append('    const [updateId, updateData] = repository.update.mock.calls[0];')
-            lines.append('')
-
-            for field, expected in test.expected_fields.items():
-                if isinstance(expected, str) and expected.startswith("$input."):
-                    input_field = expected[7:]
-                    lines.append(f'    expect(updateData).toHaveProperty("{field}");')
-                    lines.append(f'    expect(updateData.{field}).toBe(inputData.{input_field});')
-                else:
-                    lines.append(f'    expect(updateData).toHaveProperty("{field}");')
-                    lines.append(f'    expect(updateData.{field}).toBe({self._to_js_value(expected)});')
-
-        elif test.action_type == "delete":
-            lines.append('    expect(repository.delete).toHaveBeenCalledTimes(1);')
-            lines.append('    expect(repository.delete).toHaveBeenCalledWith(existing.id);')
-
-        lines.append('  });')
+        lines.append("  });")
 
         return lines
 
-    def _to_js_object(self, obj: dict) -> str:
-        """Convert dict to JavaScript object literal"""
-        items = []
-        for k, v in obj.items():
-            items.append(f'{k}: {self._to_js_value(v)}')
-        return '{ ' + ', '.join(items) + ' }'
+    def _render_assertions(self, test: PostConditionTest, repo_name: str) -> list[str]:
+        """アサーションを生成"""
+        lines = []
+
+        if test.action_type == "create":
+            lines.append(f"    expect(ctx.{repo_name}.create).toHaveBeenCalledTimes(1);")
+            lines.append(f"    const callArgs = ctx.{repo_name}.create.mock.calls[0][0];")
+            lines.append("")
+
+            for field, expected in test.expected_fields.items():
+                lines.append(f'    expect(callArgs).toHaveProperty("{field}");')
+
+                if expected["type"] == "literal":
+                    value = expected["value"]
+                    lines.append(f"    expect(callArgs.{field}).toBe({self._to_js_value(value)});")
+
+                elif expected["type"] == "input":
+                    input_field = expected["field"]
+                    lines.append(f"    expect(callArgs.{field}).toBe(inputData.{input_field});")
+
+                elif expected["type"] == "derived_simple":
+                    # シンプルな計算式は検証可能 (e.g., quantity * unitPrice)
+                    formula = expected["formula"]
+                    expr = self._formula_to_js_expr(formula, "callArgs")
+                    lines.append(f"    expect(callArgs.{field}).toBe({expr});")
+
+                elif expected["type"] == "derived_complex":
+                    # 集約などの複雑な計算は存在のみ検証
+                    lines.append(f"    // derived field with aggregation - verify type only")
+                    lines.append(f"    expect(typeof callArgs.{field}).toBe('number');")
+
+                # exists_only: フィールド存在のみ検証（値は検証しない）
+
+        elif test.action_type == "update":
+            lines.append(f"    expect(ctx.{repo_name}.update).toHaveBeenCalledTimes(1);")
+            lines.append(f"    const [updateId, updateData] = ctx.{repo_name}.update.mock.calls[0];")
+            lines.append("")
+
+            for field, expected in test.expected_fields.items():
+                lines.append(f'    expect(updateData).toHaveProperty("{field}");')
+
+                if expected["type"] == "literal":
+                    value = expected["value"]
+                    lines.append(f"    expect(updateData.{field}).toBe({self._to_js_value(value)});")
+
+                elif expected["type"] == "input":
+                    input_field = expected["field"]
+                    lines.append(f"    expect(updateData.{field}).toBe(inputData.{input_field});")
+
+                elif expected["type"] == "derived_simple":
+                    formula = expected["formula"]
+                    expr = self._formula_to_js_expr(formula, "updateData")
+                    lines.append(f"    expect(updateData.{field}).toBe({expr});")
+
+                elif expected["type"] == "derived_complex":
+                    lines.append(f"    // derived field with aggregation - verify type only")
+                    lines.append(f"    expect(typeof updateData.{field}).toBe('number');")
+
+        elif test.action_type == "delete":
+            lines.append(f"    expect(ctx.{repo_name}.delete).toHaveBeenCalledTimes(1);")
+            lines.append(f"    expect(ctx.{repo_name}.delete).toHaveBeenCalledWith(existing.id);")
+
+        return lines
+
+    def _formula_to_js_expr(self, formula: dict, context_var: str) -> str:
+        """TRIR formulaをJavaScript式に変換"""
+        formula_type = formula.get("type")
+
+        if formula_type == "literal":
+            return self._to_js_value(formula.get("value"))
+
+        if formula_type == "self":
+            field = formula.get("field")
+            return f"{context_var}.{field}"
+
+        if formula_type == "binary":
+            left = self._formula_to_js_expr(formula.get("left", {}), context_var)
+            right = self._formula_to_js_expr(formula.get("right", {}), context_var)
+            op = formula.get("op")
+            op_map = {"add": "+", "sub": "-", "mul": "*", "div": "/", "mod": "%"}
+            js_op = op_map.get(op, "+")
+            return f"({left} {js_op} {right})"
+
+        return "/* unknown formula */"
+
+    def _to_js(self, obj: dict) -> str:
+        """dict を JavaScript オブジェクトリテラルに変換"""
+        items = [f"{k}: {self._to_js_value(v)}" for k, v in obj.items()]
+        return "{ " + ", ".join(items) + " }"
 
     def _to_js_value(self, val: Any) -> str:
-        """Convert Python value to JavaScript value"""
+        """値を JavaScript 値に変換"""
         if val is None:
-            return 'null'
+            return "null"
         if isinstance(val, bool):
-            return 'true' if val else 'false'
+            return "true" if val else "false"
         if isinstance(val, str):
             return f'"{val}"'
         if isinstance(val, (int, float)):
             return str(val)
         if isinstance(val, dict):
-            return self._to_js_object(val)
+            return self._to_js(val)
         if isinstance(val, list):
-            return '[' + ', '.join(self._to_js_value(v) for v in val) + ']'
+            return "[" + ", ".join(self._to_js_value(v) for v in val) + "]"
         return str(val)
-
-    def _to_kebab(self, name: str) -> str:
-        """Convert to kebab-case"""
-        return name.replace(".", "-").replace("_", "-").lower()
-
-    def _to_camel(self, name: str) -> str:
-        """Convert to camelCase"""
-        parts = name.replace(".", "_").replace("-", "_").split("_")
-        return parts[0].lower() + "".join(p.capitalize() for p in parts[1:])

@@ -44,9 +44,9 @@ class JestUnitGenerator:
     def __init__(self, spec: dict[str, Any], typescript: bool = True):
         self.spec = spec
         self.typescript = typescript
-        self.entities = spec.get("state", {})
+        self.entities = spec.get("entities", {})
         self.derived = spec.get("derived", {})
-        self.functions = spec.get("functions", {})
+        self.functions = spec.get("commands", {})
         self.invariants = spec.get("invariants", [])
 
         # Build constraint cache
@@ -101,7 +101,7 @@ class JestUnitGenerator:
         cases = []
 
         for func_name, func_def in self.functions.items():
-            for i, error_def in enumerate(func_def.get("error", [])):
+            for i, error_def in enumerate(func_def.get("errors", [])):
                 error_code = error_def.get("code", f"ERR_{i+1:03d}")
                 reason = error_def.get("reason", "")
 

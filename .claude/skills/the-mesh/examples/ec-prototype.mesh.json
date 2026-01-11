@@ -1,0 +1,940 @@
+{
+  "meta": {
+    "id": "ec-prototype",
+    "title": "EC Site Prototype",
+    "version": "1.0.0"
+  },
+  "entities": {
+    "Product": {
+      "description": "Product for sale",
+      "aggregateRoot": true,
+      "fields": {
+        "id": {
+          "type": "string",
+          "preset": "id"
+        },
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "price": {
+          "type": "float",
+          "preset": "money",
+          "required": true,
+          "min": 0
+        },
+        "stock": {
+          "type": "int",
+          "preset": "count",
+          "required": true,
+          "min": 0
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "DRAFT",
+              "ON_SALE",
+              "DISCONTINUED"
+            ]
+          }
+        }
+      }
+    },
+    "Cart": {
+      "description": "Shopping cart",
+      "aggregateRoot": true,
+      "fields": {
+        "id": {
+          "type": "string",
+          "preset": "id"
+        },
+        "userId": {
+          "type": {
+            "ref": "User"
+          }
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "EDITING",
+              "CONFIRMED"
+            ]
+          }
+        }
+      }
+    },
+    "CartItem": {
+      "description": "Item in cart",
+      "parent": "Cart",
+      "fields": {
+        "id": {
+          "type": "string",
+          "preset": "id"
+        },
+        "cartId": {
+          "type": {
+            "ref": "Cart"
+          }
+        },
+        "productId": {
+          "type": {
+            "ref": "Product"
+          }
+        },
+        "quantity": {
+          "type": "int",
+          "preset": "count",
+          "required": true,
+          "min": 1
+        }
+      }
+    },
+    "Order": {
+      "description": "Confirmed order",
+      "aggregateRoot": true,
+      "fields": {
+        "id": {
+          "type": "string",
+          "preset": "id"
+        },
+        "userId": {
+          "type": {
+            "ref": "User"
+          }
+        },
+        "totalAmount": {
+          "type": "float",
+          "preset": "money",
+          "required": true
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "CONFIRMED",
+              "AWAITING_PAYMENT",
+              "PAID",
+              "PREPARING_SHIPMENT",
+              "SHIPPED",
+              "DELIVERED",
+              "CANCELLED"
+            ]
+          }
+        }
+      }
+    },
+    "Payment": {
+      "description": "Payment information",
+      "aggregateRoot": true,
+      "fields": {
+        "id": {
+          "type": "string",
+          "preset": "id"
+        },
+        "orderId": {
+          "type": {
+            "ref": "Order"
+          }
+        },
+        "amount": {
+          "type": "float",
+          "preset": "money",
+          "required": true
+        },
+        "refundAmount": {
+          "type": "float",
+          "preset": "money"
+        },
+        "method": {
+          "type": {
+            "enum": [
+              "CREDIT_CARD",
+              "BANK_TRANSFER",
+              "CONVENIENCE_STORE"
+            ]
+          }
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "PENDING",
+              "PROCESSING",
+              "COMPLETED",
+              "FAILED",
+              "REFUNDED"
+            ]
+          }
+        },
+        "processedAt": {
+          "type": "datetime"
+        }
+      }
+    },
+    "Shipment": {
+      "description": "Shipment information",
+      "aggregateRoot": true,
+      "fields": {
+        "id": {
+          "type": "string",
+          "preset": "id"
+        },
+        "orderId": {
+          "type": {
+            "ref": "Order"
+          }
+        },
+        "address": {
+          "type": "string",
+          "required": true
+        },
+        "carrier": {
+          "type": {
+            "enum": [
+              "YAMATO",
+              "SAGAWA",
+              "JAPAN_POST"
+            ]
+          }
+        },
+        "trackingNumber": {
+          "type": "string"
+        },
+        "status": {
+          "type": {
+            "enum": [
+              "PENDING",
+              "SHIPPED",
+              "IN_TRANSIT",
+              "DELIVERED",
+              "RETURNED"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "stateMachines": {
+    "OrderFlow": {
+      "entity": "Order",
+      "field": "status",
+      "initial": "CONFIRMED",
+      "states": {
+        "CONFIRMED": {
+          "description": "Order confirmed"
+        },
+        "AWAITING_PAYMENT": {
+          "description": "Payment in progress"
+        },
+        "PAID": {
+          "description": "Payment completed"
+        },
+        "PREPARING_SHIPMENT": {
+          "description": "Preparing for shipment"
+        },
+        "SHIPPED": {
+          "description": "Shipped"
+        },
+        "DELIVERED": {
+          "description": "Transaction completed",
+          "final": true
+        },
+        "CANCELLED": {
+          "description": "Order cancelled",
+          "final": true
+        }
+      },
+      "transitions": [
+        {
+          "id": "start_payment",
+          "from": "CONFIRMED",
+          "to": "AWAITING_PAYMENT",
+          "trigger": "user",
+          "trigger_function": "startPayment"
+        },
+        {
+          "id": "complete_payment",
+          "from": "AWAITING_PAYMENT",
+          "to": "PAID",
+          "trigger": "external",
+          "trigger_function": "completePayment",
+          "guard": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "Payment.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "COMPLETED"
+            }
+          }
+        },
+        {
+          "id": "payment_failed",
+          "from": "AWAITING_PAYMENT",
+          "to": "CONFIRMED",
+          "trigger": "external",
+          "trigger_function": "handlePaymentFailure"
+        },
+        {
+          "id": "start_shipment_prep",
+          "from": "PAID",
+          "to": "PREPARING_SHIPMENT",
+          "trigger": "user",
+          "trigger_function": "startShipmentPreparation"
+        },
+        {
+          "id": "ship",
+          "from": "PREPARING_SHIPMENT",
+          "to": "SHIPPED",
+          "trigger": "user",
+          "trigger_function": "ship",
+          "guard": {
+            "type": "binary",
+            "op": "ne",
+            "left": {
+              "type": "ref",
+              "path": "Shipment.trackingNumber"
+            },
+            "right": {
+              "type": "literal",
+              "value": null
+            }
+          }
+        },
+        {
+          "id": "deliver",
+          "from": "SHIPPED",
+          "to": "DELIVERED",
+          "trigger": "external",
+          "trigger_function": "recordDelivery"
+        },
+        {
+          "id": "cancel_before_payment",
+          "from": [
+            "CONFIRMED",
+            "AWAITING_PAYMENT"
+          ],
+          "to": "CANCELLED",
+          "trigger": "user",
+          "trigger_function": "cancel"
+        },
+        {
+          "id": "cancel_after_payment",
+          "from": "PAID",
+          "to": "CANCELLED",
+          "trigger": "user",
+          "trigger_function": "cancelWithRefund"
+        }
+      ]
+    },
+    "PaymentFlow": {
+      "entity": "Payment",
+      "field": "status",
+      "initial": "PENDING",
+      "states": {
+        "PENDING": {
+          "description": "Payment not started"
+        },
+        "PROCESSING": {
+          "description": "Payment processing"
+        },
+        "COMPLETED": {
+          "description": "Payment completed",
+          "confirmed": true
+        },
+        "FAILED": {
+          "description": "Payment failed"
+        },
+        "REFUNDED": {
+          "description": "Refund completed",
+          "final": true
+        }
+      },
+      "transitions": [
+        {
+          "id": "start_processing",
+          "from": "PENDING",
+          "to": "PROCESSING",
+          "trigger": "auto",
+          "trigger_function": "startPaymentProcessing"
+        },
+        {
+          "id": "succeed",
+          "from": "PROCESSING",
+          "to": "COMPLETED",
+          "trigger": "external",
+          "trigger_function": "recordPaymentSuccess"
+        },
+        {
+          "id": "fail",
+          "from": "PROCESSING",
+          "to": "FAILED",
+          "trigger": "external",
+          "trigger_function": "recordPaymentFailure"
+        },
+        {
+          "id": "retry",
+          "from": "FAILED",
+          "to": "PROCESSING",
+          "trigger": "user",
+          "trigger_function": "retryPayment"
+        },
+        {
+          "id": "refund",
+          "from": "COMPLETED",
+          "to": "REFUNDED",
+          "trigger": "user",
+          "trigger_function": "refund",
+          "guard": {
+            "type": "binary",
+            "op": "and",
+            "left": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "status"
+              },
+              "right": {
+                "type": "literal",
+                "value": "COMPLETED"
+              }
+            },
+            "right": {
+              "type": "binary",
+              "op": "in",
+              "left": {
+                "type": "ref",
+                "path": "Order.status"
+              },
+              "right": {
+                "type": "list",
+                "items": [
+                  {
+                    "type": "literal",
+                    "value": "PAID"
+                  },
+                  {
+                    "type": "literal",
+                    "value": "CANCELLED"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ShipmentFlow": {
+      "entity": "Shipment",
+      "field": "status",
+      "initial": "PENDING",
+      "states": {
+        "PENDING": {
+          "description": "Not yet shipped"
+        },
+        "SHIPPED": {
+          "description": "Shipped"
+        },
+        "IN_TRANSIT": {
+          "description": "In transit"
+        },
+        "DELIVERED": {
+          "description": "Delivered",
+          "final": true
+        },
+        "RETURNED": {
+          "description": "Returned",
+          "final": true
+        }
+      },
+      "transitions": [
+        {
+          "id": "ship",
+          "from": "PENDING",
+          "to": "SHIPPED",
+          "trigger": "user",
+          "trigger_function": "recordShipment"
+        },
+        {
+          "id": "start_transit",
+          "from": "SHIPPED",
+          "to": "IN_TRANSIT",
+          "trigger": "external",
+          "trigger_function": "recordTransitStart"
+        },
+        {
+          "id": "deliver",
+          "from": "IN_TRANSIT",
+          "to": "DELIVERED",
+          "trigger": "external",
+          "trigger_function": "recordDelivery"
+        },
+        {
+          "id": "return",
+          "from": [
+            "SHIPPED",
+            "IN_TRANSIT"
+          ],
+          "to": "RETURNED",
+          "trigger": "external",
+          "trigger_function": "recordReturn"
+        }
+      ]
+    }
+  },
+  "commands": {
+    "addToCart": {
+      "description": "Add product to cart",
+      "entity": "CartItem",
+      "input": {
+        "cartId": {
+          "type": "string",
+          "preset": "id",
+          "required": true
+        },
+        "productId": {
+          "type": "string",
+          "preset": "id",
+          "required": true
+        },
+        "quantity": {
+          "type": "int",
+          "preset": "count",
+          "required": true,
+          "min": 1
+        }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "ge",
+            "left": {
+              "type": "ref",
+              "path": "Product.stock"
+            },
+            "right": {
+              "type": "input",
+              "name": "quantity"
+            }
+          },
+          "reason": "Insufficient stock"
+        }
+      ]
+    },
+    "confirmOrder": {
+      "description": "Create order from cart",
+      "entity": "Order",
+      "input": {
+        "cartId": {
+          "type": "string",
+          "preset": "id",
+          "required": true
+        },
+        "shippingAddress": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "agg",
+            "op": "exists",
+            "from": "CartItem",
+            "where": {
+              "type": "binary",
+              "op": "eq",
+              "left": {
+                "type": "ref",
+                "path": "cartId"
+              },
+              "right": {
+                "type": "input",
+                "name": "cartId"
+              }
+            }
+          },
+          "reason": "Cart is empty"
+        }
+      ]
+    },
+    "startPayment": {
+      "description": "Start payment",
+      "entity": "Payment",
+      "input": {
+        "orderId": {
+          "type": "string",
+          "preset": "id",
+          "required": true
+        },
+        "method": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "triggers": [
+        "OrderFlow.start_payment"
+      ]
+    },
+    "cancelWithRefund": {
+      "description": "Cancel order and process refund",
+      "entity": "Order",
+      "input": {
+        "orderId": {
+          "type": "string",
+          "preset": "id",
+          "required": true
+        },
+        "reason": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "triggers": [
+        "OrderFlow.cancel_after_payment"
+      ],
+      "saga": "CancelRefundSaga"
+    }
+  },
+  "queries": {
+    "listProducts": {
+      "description": "List products on sale",
+      "entity": "Product",
+      "filter": {
+        "type": "binary",
+        "op": "eq",
+        "left": {
+          "type": "ref",
+          "path": "status"
+        },
+        "right": {
+          "type": "literal",
+          "value": "ON_SALE"
+        }
+      },
+      "orderBy": {
+        "field": "name",
+        "direction": "asc"
+      },
+      "pagination": {
+        "defaultLimit": 20,
+        "maxLimit": 100
+      }
+    },
+    "getOrderHistory": {
+      "description": "Get user's order history",
+      "entity": "Order",
+      "filter": {
+        "type": "binary",
+        "op": "eq",
+        "left": {
+          "type": "ref",
+          "path": "userId"
+        },
+        "right": {
+          "type": "principal",
+          "field": "id"
+        }
+      },
+      "orderBy": {
+        "field": "createdAt",
+        "direction": "desc"
+      }
+    }
+  },
+  "sagas": {
+    "CancelRefundSaga": {
+      "description": "Process order cancellation and refund atomically",
+      "steps": [
+        {
+          "name": "cancelOrder",
+          "forward": "OrderFlow.cancel_after_payment",
+          "compensate": "revertOrderCancellation"
+        },
+        {
+          "name": "refund",
+          "forward": "PaymentFlow.refund",
+          "compensate": "revertRefund"
+        },
+        {
+          "name": "restoreStock",
+          "forward": "restoreStock",
+          "compensate": "decreaseStock"
+        }
+      ],
+      "onFailure": "compensate_all"
+    }
+  },
+  "invariants": [
+    {
+      "id": "positive_price",
+      "entity": "Product",
+      "expr": {
+        "type": "binary",
+        "op": "gt",
+        "left": {
+          "type": "ref",
+          "path": "price"
+        },
+        "right": {
+          "type": "literal",
+          "value": 0
+        }
+      },
+      "description": "Product price must be positive",
+      "severity": "error",
+      "violation": "Product price must be greater than 0"
+    },
+    {
+      "id": "non_negative_stock",
+      "entity": "Product",
+      "expr": {
+        "type": "binary",
+        "op": "ge",
+        "left": {
+          "type": "ref",
+          "path": "stock"
+        },
+        "right": {
+          "type": "literal",
+          "value": 0
+        }
+      },
+      "description": "Stock must be non-negative",
+      "severity": "error",
+      "violation": "Stock must be 0 or greater"
+    },
+    {
+      "id": "cart_quantity_within_stock",
+      "entity": "CartItem",
+      "expr": {
+        "type": "binary",
+        "op": "le",
+        "left": {
+          "type": "ref",
+          "path": "quantity"
+        },
+        "right": {
+          "type": "ref",
+          "path": "Product.stock"
+        }
+      },
+      "description": "Cart quantity must not exceed stock",
+      "severity": "error",
+      "violation": "Insufficient stock"
+    },
+    {
+      "id": "refund_within_payment",
+      "entity": "Payment",
+      "expr": {
+        "type": "binary",
+        "op": "le",
+        "left": {
+          "type": "ref",
+          "path": "refundAmount"
+        },
+        "right": {
+          "type": "ref",
+          "path": "amount"
+        }
+      },
+      "description": "Refund amount must not exceed payment amount",
+      "when": {
+        "type": "binary",
+        "op": "eq",
+        "left": {
+          "type": "ref",
+          "path": "status"
+        },
+        "right": {
+          "type": "literal",
+          "value": "REFUNDED"
+        }
+      },
+      "severity": "critical",
+      "violation": "Refund amount exceeds payment amount"
+    },
+    {
+      "id": "shipment_requires_tracking",
+      "entity": "Shipment",
+      "expr": {
+        "type": "binary",
+        "op": "ne",
+        "left": {
+          "type": "ref",
+          "path": "trackingNumber"
+        },
+        "right": {
+          "type": "literal",
+          "value": null
+        }
+      },
+      "description": "Tracking number required for shipped items",
+      "when": {
+        "type": "binary",
+        "op": "eq",
+        "left": {
+          "type": "ref",
+          "path": "status"
+        },
+        "right": {
+          "type": "literal",
+          "value": "SHIPPED"
+        }
+      },
+      "severity": "error",
+      "violation": "Tracking number is required"
+    }
+  ],
+  "roles": {
+    "buyer": {
+      "description": "User who purchases products",
+      "permissions": [
+        {
+          "resource": "Product",
+          "actions": [
+            "read",
+            "list"
+          ]
+        },
+        {
+          "resource": "Cart",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
+          ],
+          "condition": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "userId"
+            },
+            "right": {
+              "type": "principal",
+              "field": "id"
+            }
+          }
+        },
+        {
+          "resource": "Order",
+          "actions": [
+            "create",
+            "read"
+          ],
+          "condition": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "userId"
+            },
+            "right": {
+              "type": "principal",
+              "field": "id"
+            }
+          }
+        }
+      ]
+    },
+    "storeAdmin": {
+      "description": "Store management staff",
+      "permissions": [
+        {
+          "resource": "Product",
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete",
+            "list"
+          ]
+        },
+        {
+          "resource": "Order",
+          "actions": [
+            "read",
+            "list",
+            "update"
+          ]
+        },
+        {
+          "resource": "Shipment",
+          "actions": [
+            "create",
+            "read",
+            "update"
+          ]
+        }
+      ]
+    }
+  },
+  "testStrategies": {
+    "coverage": {
+      "mode": "risk_based",
+      "maxScenarios": 200,
+      "prioritize": [
+        {
+          "severity": [
+            "critical"
+          ]
+        },
+        {
+          "entities": [
+            "Order",
+            "Payment"
+          ]
+        },
+        {
+          "presets": [
+            "money"
+          ]
+        }
+      ]
+    },
+    "templates": {
+      "boundary_values": {
+        "enabled": true,
+        "targets": [
+          "money",
+          "count"
+        ]
+      },
+      "state_transition": {
+        "enabled": true,
+        "testTypes": [
+          "invalid_from_state",
+          "final_state_exit",
+          "guard_failure"
+        ]
+      },
+      "idempotency": {
+        "enabled": true,
+        "targets": [
+          "addToCart",
+          "confirmOrder"
+        ]
+      },
+      "concurrency": {
+        "enabled": true,
+        "targets": [
+          "Order",
+          "Payment"
+        ],
+        "parallelRequests": 2
+      },
+      "authorization": {
+        "enabled": true,
+        "targets": [
+          "buyer",
+          "storeAdmin"
+        ]
+      }
+    }
+  }
+}

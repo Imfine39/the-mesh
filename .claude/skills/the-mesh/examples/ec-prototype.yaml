@@ -1,0 +1,460 @@
+# EC Site Prototype - Structured YAML Specification
+# This spec demonstrates the Customer Layer format that converts to TRIR
+
+meta:
+  id: ec-prototype
+  title: EC Site Prototype
+  version: "1.0.0"
+
+entities:
+  Product:
+    description: Product for sale
+    aggregateRoot: true
+    fields:
+      id: { type: id }
+      name: { type: string, required: true }
+      price: { type: money, required: true, min: 0 }
+      stock: { type: count, required: true, min: 0 }
+      status: { type: enum, values: [DRAFT, ON_SALE, DISCONTINUED] }
+
+  Cart:
+    description: Shopping cart
+    aggregateRoot: true
+    fields:
+      id: { type: id }
+      userId: { type: ref, ref: User }
+      status: { type: enum, values: [EDITING, CONFIRMED] }
+
+  CartItem:
+    description: Item in cart
+    aggregateRoot: false
+    parent: Cart
+    fields:
+      id: { type: id }
+      cartId: { type: ref, ref: Cart }
+      productId: { type: ref, ref: Product }
+      quantity: { type: count, required: true, min: 1 }
+
+  Order:
+    description: Confirmed order
+    aggregateRoot: true
+    fields:
+      id: { type: id }
+      userId: { type: ref, ref: User }
+      totalAmount: { type: money, required: true }
+      status: { type: enum, values: [CONFIRMED, AWAITING_PAYMENT, PAID, PREPARING_SHIPMENT, SHIPPED, DELIVERED, CANCELLED] }
+
+  Payment:
+    description: Payment information
+    aggregateRoot: true
+    fields:
+      id: { type: id }
+      orderId: { type: ref, ref: Order }
+      amount: { type: money, required: true }
+      refundAmount: { type: money }
+      method: { type: enum, values: [CREDIT_CARD, BANK_TRANSFER, CONVENIENCE_STORE] }
+      status: { type: enum, values: [PENDING, PROCESSING, COMPLETED, FAILED, REFUNDED] }
+      processedAt: { type: datetime }
+
+  Shipment:
+    description: Shipment information
+    aggregateRoot: true
+    fields:
+      id: { type: id }
+      orderId: { type: ref, ref: Order }
+      address: { type: string, required: true }
+      carrier: { type: enum, values: [YAMATO, SAGAWA, JAPAN_POST] }
+      trackingNumber: { type: string }
+      status: { type: enum, values: [PENDING, SHIPPED, IN_TRANSIT, DELIVERED, RETURNED] }
+
+stateMachines:
+  OrderFlow:
+    entity: Order
+    field: status
+    initial: CONFIRMED
+    states:
+      CONFIRMED: { description: Order confirmed, awaiting payment }
+      AWAITING_PAYMENT: { description: Payment in progress }
+      PAID: { description: Payment completed, awaiting shipment }
+      PREPARING_SHIPMENT: { description: Preparing for shipment }
+      SHIPPED: { description: Shipped, awaiting delivery }
+      DELIVERED: { description: Transaction completed, final: true }
+      CANCELLED: { description: Order cancelled, final: true }
+    transitions:
+      - id: start_payment
+        from: CONFIRMED
+        to: AWAITING_PAYMENT
+        trigger: user
+        trigger_function: startPayment
+      - id: complete_payment
+        from: AWAITING_PAYMENT
+        to: PAID
+        trigger: external
+        trigger_function: completePayment
+        guard:
+          field: Payment:status
+          op: "=="
+          value: COMPLETED
+      - id: payment_failed
+        from: AWAITING_PAYMENT
+        to: CONFIRMED
+        trigger: external
+        trigger_function: handlePaymentFailure
+      - id: start_shipment_prep
+        from: PAID
+        to: PREPARING_SHIPMENT
+        trigger: user
+        trigger_function: startShipmentPreparation
+      - id: ship
+        from: PREPARING_SHIPMENT
+        to: SHIPPED
+        trigger: user
+        trigger_function: ship
+        guard:
+          field: Shipment:trackingNumber
+          op: "!="
+          value: null
+      - id: deliver
+        from: SHIPPED
+        to: DELIVERED
+        trigger: external
+        trigger_function: recordDelivery
+      - id: cancel_before_payment
+        from: [CONFIRMED, AWAITING_PAYMENT]
+        to: CANCELLED
+        trigger: user
+        trigger_function: cancel
+      - id: cancel_after_payment
+        from: PAID
+        to: CANCELLED
+        trigger: user
+        trigger_function: cancelWithRefund
+
+  PaymentFlow:
+    entity: Payment
+    field: status
+    initial: PENDING
+    states:
+      PENDING: { description: Payment not started }
+      PROCESSING: { description: Payment processing }
+      COMPLETED: { description: Payment completed, confirmed: true }
+      FAILED: { description: Payment failed }
+      REFUNDED: { description: Refund completed, final: true }
+    transitions:
+      - id: start_processing
+        from: PENDING
+        to: PROCESSING
+        trigger: auto
+        trigger_function: startPaymentProcessing
+      - id: succeed
+        from: PROCESSING
+        to: COMPLETED
+        trigger: external
+        trigger_function: recordPaymentSuccess
+      - id: fail
+        from: PROCESSING
+        to: FAILED
+        trigger: external
+        trigger_function: recordPaymentFailure
+      - id: retry
+        from: FAILED
+        to: PROCESSING
+        trigger: user
+        trigger_function: retryPayment
+      - id: refund
+        from: COMPLETED
+        to: REFUNDED
+        trigger: user
+        trigger_function: refund
+        guard:
+          and:
+            - field: self:status
+              op: "=="
+              value: COMPLETED
+            - field: Order:status
+              op: "in"
+              value: [PAID, CANCELLED]
+
+  ShipmentFlow:
+    entity: Shipment
+    field: status
+    initial: PENDING
+    states:
+      PENDING: { description: Not yet shipped }
+      SHIPPED: { description: Shipped }
+      IN_TRANSIT: { description: In transit }
+      DELIVERED: { description: Delivered, final: true }
+      RETURNED: { description: Returned, final: true }
+    transitions:
+      - id: ship
+        from: PENDING
+        to: SHIPPED
+        trigger: user
+        trigger_function: recordShipment
+      - id: start_transit
+        from: SHIPPED
+        to: IN_TRANSIT
+        trigger: external
+        trigger_function: recordTransitStart
+      - id: deliver
+        from: IN_TRANSIT
+        to: DELIVERED
+        trigger: external
+        trigger_function: recordDelivery
+      - id: return
+        from: [SHIPPED, IN_TRANSIT]
+        to: RETURNED
+        trigger: external
+        trigger_function: recordReturn
+
+commands:
+  addToCart:
+    description: Add product to cart
+    entity: CartItem
+    input:
+      cartId: { type: id, required: true }
+      productId: { type: id, required: true }
+      quantity: { type: count, required: true, min: 1 }
+    pre:
+      - expr:
+          field: Product:stock
+          op: ">="
+          ref: input:quantity
+        error: Insufficient stock
+    post:
+      - action:
+          create: CartItem
+          with:
+            cartId: { type: input, name: cartId }
+            productId: { type: input, name: productId }
+            quantity: { type: input, name: quantity }
+      - action:
+          update: Product
+          set:
+            stock: { type: binary, op: sub, left: { type: ref, path: stock }, right: { type: input, name: quantity } }
+
+  confirmOrder:
+    description: Create order from cart
+    entity: Order
+    input:
+      cartId: { type: id, required: true }
+      shippingAddress: { type: string, required: true }
+    pre:
+      - expr:
+          # Level 3: Complex conditions use raw TRIR
+          expr:
+            type: agg
+            op: exists
+            from: CartItem
+            where:
+              type: binary
+              op: eq
+              left: { type: ref, path: cartId }
+              right: { type: input, name: cartId }
+        error: Cart is empty
+    post:
+      - action:
+          create: Order
+          with:
+            userId: { type: principal, field: id }
+            status: { type: literal, value: CONFIRMED }
+      - action:
+          create: Shipment
+          with:
+            address: { type: input, name: shippingAddress }
+            status: { type: literal, value: PENDING }
+      - action:
+          update: Cart
+          set:
+            status: { type: literal, value: CONFIRMED }
+
+  startPayment:
+    description: Start payment
+    entity: Payment
+    input:
+      orderId: { type: id, required: true }
+      method: { type: string, required: true }
+      amount: { type: money, required: true }
+    triggers: [OrderFlow.start_payment]
+    post:
+      - action:
+          create: Payment
+          with:
+            orderId: { type: input, name: orderId }
+            amount: { type: input, name: amount }
+            method: { type: input, name: method }
+            status: { type: literal, value: PENDING }
+
+  cancelWithRefund:
+    description: Cancel order and process refund
+    entity: Order
+    input:
+      orderId: { type: id, required: true }
+      reason: { type: string, required: true }
+    triggers: [OrderFlow.cancel_after_payment]
+    saga: CancelRefundSaga
+    post:
+      - action:
+          update: Order
+          set:
+            status: { type: literal, value: CANCELLED }
+      - action:
+          update: Payment
+          set:
+            status: { type: literal, value: REFUNDED }
+            refundAmount: { type: ref, path: amount }
+
+queries:
+  listProducts:
+    description: List products on sale
+    entity: Product
+    filter:
+      field: self:status
+      op: "=="
+      value: ON_SALE
+    orderBy:
+      field: name
+      direction: asc
+    pagination:
+      defaultLimit: 20
+      maxLimit: 100
+
+  getOrderHistory:
+    description: Get user's order history
+    entity: Order
+    filter:
+      field: self:userId
+      op: "=="
+      ref: principal:id
+    orderBy:
+      field: createdAt
+      direction: desc
+
+sagas:
+  CancelRefundSaga:
+    description: Process order cancellation and refund atomically
+    steps:
+      - name: cancelOrder
+        forward: OrderFlow.cancel_after_payment
+        compensate: revertOrderCancellation
+      - name: refund
+        forward: PaymentFlow.refund
+        compensate: revertRefund
+      - name: restoreStock
+        forward: restoreStock
+        compensate: decreaseStock
+    onFailure: compensate_all
+
+invariants:
+  - id: positive_price
+    entity: Product
+    description: Product price must be positive
+    expr:
+      field: self:price
+      op: ">"
+      value: 0
+    severity: error
+    violation: Product price must be greater than 0
+
+  - id: non_negative_stock
+    entity: Product
+    description: Stock must be non-negative
+    expr:
+      field: self:stock
+      op: ">="
+      value: 0
+    severity: error
+    violation: Stock must be 0 or greater
+
+  - id: cart_quantity_within_stock
+    entity: CartItem
+    description: Cart quantity must not exceed stock
+    expr:
+      field: self:quantity
+      op: "<="
+      ref: Product:stock
+    severity: error
+    violation: Insufficient stock
+
+  - id: refund_within_payment
+    entity: Payment
+    description: Refund amount must not exceed payment amount
+    when:
+      field: self:status
+      op: "=="
+      value: REFUNDED
+    expr:
+      field: self:refundAmount
+      op: "<="
+      ref: self:amount
+    severity: critical
+    violation: Refund amount exceeds payment amount
+
+  - id: shipment_requires_tracking
+    entity: Shipment
+    description: Tracking number required for shipped items
+    when:
+      field: self:status
+      op: "=="
+      value: SHIPPED
+    expr:
+      field: self:trackingNumber
+      op: "!="
+      value: null
+    severity: error
+    violation: Tracking number is required
+
+roles:
+  buyer:
+    description: User who purchases products
+    permissions:
+      - resource: Product
+        actions: [read, list]
+      - resource: Cart
+        actions: [create, read, update, delete]
+        condition:
+          field: self:userId
+          op: "=="
+          ref: principal:id
+      - resource: Order
+        actions: [create, read]
+        condition:
+          field: self:userId
+          op: "=="
+          ref: principal:id
+
+  storeAdmin:
+    description: Store management staff
+    permissions:
+      - resource: Product
+        actions: [create, read, update, delete, list]
+      - resource: Order
+        actions: [read, list, update]
+      - resource: Shipment
+        actions: [create, read, update]
+
+testStrategies:
+  coverage:
+    mode: risk_based
+    maxScenarios: 200
+    prioritize:
+      - severity: [critical]
+      - entities: [Order, Payment]
+      - presets: [money]
+  templates:
+    boundary_values:
+      enabled: true
+      targets: [money, count]
+    state_transition:
+      enabled: true
+      testTypes: [invalid_from_state, final_state_exit, guard_failure]
+    idempotency:
+      enabled: true
+      targets: [addToCart, confirmOrder]
+    concurrency:
+      enabled: true
+      targets: [Order, Payment]
+      parallelRequests: 2
+    authorization:
+      enabled: true
+      targets: [buyer, storeAdmin]

@@ -19,7 +19,7 @@ class TestFrontendViewValidation:
         """Test that valid view passes validation"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {
                     "fields": {
                         "id": {"type": "string"},
@@ -28,7 +28,7 @@ class TestFrontendViewValidation:
                     }
                 }
             },
-            "functions": {
+            "commands": {
                 "close_invoice": {
                     "input": {"invoice_id": {"type": "string"}}
                 }
@@ -56,7 +56,7 @@ class TestFrontendViewValidation:
         """Test FE-002: View references unknown entity"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
             "views": {
@@ -75,7 +75,7 @@ class TestFrontendViewValidation:
         """Test FE-002: View field references unknown entity field"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {
                     "fields": {
                         "id": {"type": "string"},
@@ -103,7 +103,7 @@ class TestFrontendViewValidation:
         """Test FE-002: View filter references unknown field"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
             "views": {
@@ -125,7 +125,7 @@ class TestFrontendViewValidation:
         """Test FE-002: View defaultSort references unknown field"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
             "views": {
@@ -145,10 +145,10 @@ class TestFrontendViewValidation:
         """Test FE-003: View action references unknown function"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
-            "functions": {
+            "commands": {
                 "close_invoice": {"input": {"id": {"type": "string"}}}
             },
             "views": {
@@ -177,7 +177,7 @@ class TestFrontendRouteValidation:
         """Test that valid route passes validation"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
             "views": {
@@ -203,7 +203,7 @@ class TestFrontendRouteValidation:
         """Test FE-004: Route references unknown view"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
             "views": {
@@ -224,7 +224,7 @@ class TestFrontendRouteValidation:
         """Test FE-004: Route guard references unknown role"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
             "views": {
@@ -251,7 +251,7 @@ class TestFrontendRouteValidation:
         """Test FE-004: Route guard references unknown permission"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
             "views": {
@@ -285,10 +285,10 @@ class TestUnusedFunctionWarning:
         """Test that used functions don't generate warning"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
-            "functions": {
+            "commands": {
                 "close_invoice": {"input": {"id": {"type": "string"}}}
             },
             "views": {
@@ -309,10 +309,10 @@ class TestUnusedFunctionWarning:
         """Test FE-005: Warning for function not used in any view"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
-            "functions": {
+            "commands": {
                 "close_invoice": {"input": {"id": {"type": "string"}}},
                 "delete_invoice": {"input": {"id": {"type": "string"}}}  # Not used
             },
@@ -335,10 +335,10 @@ class TestUnusedFunctionWarning:
         """Test that functions used in subscriptions don't generate warning"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
-            "functions": {
+            "commands": {
                 "handle_invoice_created": {"input": {"id": {"type": "string"}}}
             },
             "events": {
@@ -364,10 +364,10 @@ class TestUnusedFunctionWarning:
         """Test that functions used in sagas don't generate warning"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "order": {"fields": {"id": {"type": "string"}}}
             },
-            "functions": {
+            "commands": {
                 "create_order": {"input": {"id": {"type": "string"}}},
                 "rollback_order": {"input": {"id": {"type": "string"}}}
             },
@@ -392,10 +392,10 @@ class TestUnusedFunctionWarning:
         """Test that functions used in schedules don't generate warning"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "report": {"fields": {"id": {"type": "string"}}}
             },
-            "functions": {
+            "commands": {
                 "generate_report": {"input": {}}
             },
             "schedules": {
@@ -417,10 +417,10 @@ class TestUnusedFunctionWarning:
         """Test that no warning when views section is empty"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
-            "functions": {
+            "commands": {
                 "some_function": {"input": {}}
             }
             # No views defined
@@ -434,10 +434,10 @@ class TestUnusedFunctionWarning:
         """Test that private functions (starting with _) are not warned"""
         spec = {
             "meta": {"id": "test", "title": "Test", "version": "1.0.0"},
-            "state": {
+            "entities": {
                 "invoice": {"fields": {"id": {"type": "string"}}}
             },
-            "functions": {
+            "commands": {
                 "_internal_helper": {"input": {}},  # Private function
                 "public_unused": {"input": {}}  # Should warn
             },

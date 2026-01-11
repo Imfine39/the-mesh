@@ -41,9 +41,9 @@ class HumanReadableGenerator:
     def __init__(self, spec: dict):
         self.spec = spec
         self.meta = spec.get("meta", {})
-        self.state = spec.get("state", {})
+        self.state = spec.get("entities", {})
         self.derived = spec.get("derived", {})
-        self.functions = spec.get("functions", {})
+        self.functions = spec.get("commands", {})
         self.scenarios = spec.get("scenarios", {})
         self.invariants = spec.get("invariants", [])
         self.requirements = spec.get("requirements", {})
@@ -195,9 +195,15 @@ class HumanReadableGenerator:
             for post in func.get("post", []):
                 action = post.get("action", {})
                 if "update" in action:
-                    update_entity = action["update"]
-                    if update_entity == entity_name:
+                    update_action = action["update"]
+                    # Support both formats: string or dict {"target": ..., "set": {...}}
+                    if isinstance(update_action, dict):
+                        update_entity = update_action.get("target", "")
+                        set_values = update_action.get("set", {})
+                    else:
+                        update_entity = update_action
                         set_values = action.get("set", {})
+                    if update_entity == entity_name:
                         if field_name in set_values:
                             to_val = set_values[field_name]
                             if isinstance(to_val, dict) and to_val.get("type") == "literal":
@@ -306,13 +312,22 @@ class HumanReadableGenerator:
     def _describe_action(self, action: dict) -> str:
         """Describe an action in short text"""
         if "create" in action:
-            return f"Create {action['create']}"
+            create_action = action["create"]
+            entity = create_action.get("target") if isinstance(create_action, dict) else create_action
+            return f"Create {entity}"
         if "update" in action:
-            entity = action["update"]
-            fields = list(action.get("set", {}).keys())
+            update_action = action["update"]
+            if isinstance(update_action, dict):
+                entity = update_action.get("target", "")
+                fields = list(update_action.get("set", {}).keys())
+            else:
+                entity = update_action
+                fields = list(action.get("set", {}).keys())
             return f"Update {entity}.{', '.join(fields[:2])}"
         if "delete" in action:
-            return f"Delete {action['delete']}"
+            delete_action = action["delete"]
+            entity = delete_action.get("target") if isinstance(delete_action, dict) else delete_action
+            return f"Delete {entity}"
         return "Action"
 
     def _describe_expr_short(self, expr: dict) -> str:
@@ -632,14 +647,22 @@ class HumanReadableGenerator:
     def _describe_action_detail(self, action: dict) -> str:
         """Describe an action in detail"""
         if "create" in action:
-            entity = action["create"]
+            create_action = action["create"]
+            entity = create_action.get("target") if isinstance(create_action, dict) else create_action
             return f"{entity}レコードを作成"
         if "update" in action:
-            entity = action["update"]
-            fields = list(action.get("set", {}).keys())
+            update_action = action["update"]
+            if isinstance(update_action, dict):
+                entity = update_action.get("target", "")
+                fields = list(update_action.get("set", {}).keys())
+            else:
+                entity = update_action
+                fields = list(action.get("set", {}).keys())
             return f"{entity}の{', '.join(fields)}を更新"
         if "delete" in action:
-            return f"{action['delete']}レコードを削除"
+            delete_action = action["delete"]
+            entity = delete_action.get("target") if isinstance(delete_action, dict) else delete_action
+            return f"{entity}レコードを削除"
         return "アクション実行"
 
     # =========================================================================

@@ -22,9 +22,9 @@ class PytestGenerator:
                            e.g. {"create_order": "src.orders.create_order"}
         """
         self.spec = spec
-        self.entities = spec.get("state", {})
+        self.entities = spec.get("entities", {})
         self.derived = spec.get("derived", {})
-        self.functions = spec.get("functions", {})
+        self.functions = spec.get("commands", {})
         self.scenarios = spec.get("scenarios", {})
         self.invariants = spec.get("invariants", [])
         self.import_modules = import_modules or {}
@@ -264,7 +264,13 @@ class PytestGenerator:
         title = scenario.get("title", "")
 
         # Build fixture list
-        given = scenario.get("given", {})
+        given_raw = scenario.get("given", {})
+        # Normalize given to dict format for compatibility
+        if isinstance(given_raw, list):
+            # List format: [{"entity": "Product", "id": "...", "data": {...}}, ...]
+            given = {item["entity"]: item.get("data", {}) for item in given_raw if "entity" in item}
+        else:
+            given = given_raw
         fixtures = []
         for entity_name in given.keys():
             if entity_name in self.entities:
@@ -332,12 +338,12 @@ class PytestGenerator:
         then = scenario.get("then", {})
         lines.append('        # Then')
 
-        if then.get("success") is True:
+        if then.get("result", {}).get("success") is True:
             lines.append(f'        {comment}assert result["success"] is True')
-        elif then.get("success") is False:
+        elif then.get("result", {}).get("success") is False:
             lines.append(f'        {comment}assert result["success"] is False')
-            if "error" in then:
-                lines.append(f'        {comment}assert result["error"]["code"] == {repr(then["error"])}')
+            if "error" in then.get("result", {}):
+                lines.append(f'        {comment}assert result["error"]["code"] == {repr(then["result"]["error"])}')
 
         for i, assertion in enumerate(then.get("assert", [])):
             lines.append(f'        # Assertion: {self._expr_to_pseudo(assertion)}')

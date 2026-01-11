@@ -16,8 +16,8 @@ class OpenAPIGenerator:
         self.spec = spec
         self.base_url = base_url.rstrip("/")
         self.meta = spec.get("meta", {})
-        self.entities = spec.get("state", {})
-        self.functions = spec.get("functions", {})
+        self.entities = spec.get("entities", {})
+        self.functions = spec.get("commands", {})
 
     def generate(self) -> dict:
         """Generate complete OpenAPI 3.1 schema."""

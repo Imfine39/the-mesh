@@ -18,7 +18,7 @@ class SagaValidationMixin:
         """
         errors = []
         sagas = spec.get("sagas", {})
-        functions = spec.get("functions", {})
+        functions = spec.get("commands", {})
 
         valid_failure_policies = ["compensate_all", "compensate_completed", "fail_fast", "continue"]
 

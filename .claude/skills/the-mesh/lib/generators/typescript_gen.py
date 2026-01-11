@@ -12,8 +12,8 @@ class TypeScriptGenerator:
 
     def __init__(self, spec: dict):
         self.spec = spec
-        self.entities = spec.get("state", {})
-        self.functions = spec.get("functions", {})
+        self.entities = spec.get("entities", {})
+        self.functions = spec.get("commands", {})
         self.derived = spec.get("derived", {})
 
     def generate_all(self) -> str:

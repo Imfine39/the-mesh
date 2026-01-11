@@ -25,9 +25,9 @@ class JestGenerator:
         """
         self.spec = spec
         self.typescript = typescript
-        self.entities = spec.get("state", {})
+        self.entities = spec.get("entities", {})
         self.derived = spec.get("derived", {})
-        self.functions = spec.get("functions", {})
+        self.functions = spec.get("commands", {})
         self.scenarios = spec.get("scenarios", {})
         self.invariants = spec.get("invariants", [])
         self.import_modules = import_modules or {}
@@ -266,10 +266,24 @@ class JestGenerator:
         lines.append(f"  it('{title}', async () => {{")
 
         # Given section
-        given = scenario.get("given", {})
+        given_raw = scenario.get("given", {})
         lines.append('    // Given')
 
-        for entity_name, data in given.items():
+        # Normalize given: support both list format [{entity, data}] and dict format {entity: data}
+        given_normalized = {}
+        if isinstance(given_raw, list):
+            for item in given_raw:
+                if isinstance(item, dict) and "entity" in item:
+                    entity_name = item["entity"]
+                    entity_data = item.get("data", {})
+                    # Merge id into data if present
+                    if "id" in item:
+                        entity_data = {"id": item["id"], **entity_data}
+                    given_normalized[entity_name] = entity_data
+        else:
+            given_normalized = given_raw
+
+        for entity_name, data in given_normalized.items():
             if entity_name not in self.entities:
                 continue
             camel = self._to_camel(entity_name)
@@ -280,7 +294,7 @@ class JestGenerator:
                 lines.append(f'    const {camel} = create{entity_name}({self._to_js_object(data)});')
 
         # Create repositories
-        for entity_name in given.keys():
+        for entity_name in given_normalized.keys():
             if entity_name in self.entities:
                 lines.append(f'    const {self._to_camel(entity_name)}Repository = createMock{entity_name}Repository();')
 
@@ -299,7 +313,7 @@ class JestGenerator:
         has_import = func_name in self.import_modules
         comment = "" if has_import else "// "
 
-        repo_args = ", ".join(f'{self._to_camel(e)}Repository' for e in given.keys() if e in self.entities)
+        repo_args = ", ".join(f'{self._to_camel(e)}Repository' for e in given_normalized.keys() if e in self.entities)
         if repo_args:
             lines.append(f'    {comment}const result = await {func_name}(inputData, {{ {repo_args} }});')
         else:

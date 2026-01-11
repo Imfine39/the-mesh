@@ -35,8 +35,8 @@ class PostConditionGenerator:
             import_modules: Map of function_name -> module path
         """
         self.spec = spec
-        self.functions = spec.get("functions", {})
-        self.entities = spec.get("state", {})  # Note: "state" not "entities"
+        self.functions = spec.get("commands", {})
+        self.entities = spec.get("entities", {})  
         self.import_modules = import_modules or {}
 
     def generate_all(self) -> str:
@@ -80,8 +80,14 @@ class PostConditionGenerator:
         self, func_name: str, func_def: dict, action: dict, index: int
     ) -> PostConditionTest:
         """Generate test for create action"""
-        entity_name = action["create"]
-        with_values = action.get("with", {})
+        create_action = action["create"]
+        # Support both formats: string "Invoice" or dict {"target": "Invoice", "data": {...}}
+        if isinstance(create_action, dict):
+            entity_name = create_action.get("target", "Unknown")
+            with_values = create_action.get("data", {})
+        else:
+            entity_name = create_action
+            with_values = action.get("with", {})
 
         # Extract expected fields from the "with" clause
         expected_fields = {}
@@ -103,8 +109,14 @@ class PostConditionGenerator:
         self, func_name: str, func_def: dict, action: dict, index: int
     ) -> PostConditionTest:
         """Generate test for update action"""
-        entity_name = action["update"]
-        set_values = action.get("set", {})
+        update_action = action["update"]
+        # Support both formats: string or dict {"target": ..., "set": {...}}
+        if isinstance(update_action, dict):
+            entity_name = update_action.get("target", "Unknown")
+            set_values = update_action.get("set", {})
+        else:
+            entity_name = update_action
+            set_values = action.get("set", {})
 
         expected_fields = {}
         for field_name, value_expr in set_values.items():
@@ -125,7 +137,12 @@ class PostConditionGenerator:
         self, func_name: str, func_def: dict, action: dict, index: int
     ) -> PostConditionTest:
         """Generate test for delete action"""
-        entity_name = action["delete"]
+        delete_action = action["delete"]
+        # Support both formats: string or dict {"target": ..., "id": {...}}
+        if isinstance(delete_action, dict):
+            entity_name = delete_action.get("target", "Unknown")
+        else:
+            entity_name = delete_action
 
         return PostConditionTest(
             id=f"pc_{func_name}_deletes_{self._to_snake(entity_name)}",
@@ -148,7 +165,7 @@ class PostConditionGenerator:
         if expr_type == "literal":
             return expr.get("value")
         elif expr_type == "input":
-            return f"$input.{expr.get('name')}"
+            return f"$input.{expr.get('field')}"
         else:
             return f"$expr"
 

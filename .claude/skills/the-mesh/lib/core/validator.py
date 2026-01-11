@@ -200,7 +200,7 @@ class MeshValidator(
         if not self._cache:
             return
 
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
         for entity_name, entity in entities.items():
             fields = entity.get("fields", {})
             # Cache field names and their types
@@ -230,7 +230,7 @@ class MeshValidator(
             if self._cache:
                 self._cache.misses += 1
             # Fallback to direct lookup
-            entities = spec.get("state", {})
+            entities = spec.get("entities", {})
             if entity_name in entities:
                 fields = entities[entity_name].get("fields", {})
                 if field_name in fields:
@@ -498,8 +498,8 @@ class MeshValidator(
     def _validate_references(self, spec: dict) -> list[ValidationError]:
         """Validate entity references (foreign keys) - Phase 4-1 refactored"""
         errors = []
-        entities = set(spec.get("state", {}).keys())
-        functions = set(spec.get("functions", {}).keys())
+        entities = set(spec.get("entities", {}).keys())
+        functions = set(spec.get("commands", {}).keys())
         events = set(spec.get("events", {}).keys())
         roles = set(spec.get("roles", {}).keys())
 
@@ -508,7 +508,7 @@ class MeshValidator(
                 errors.append(err)
 
         # Check FK references in entity fields
-        for entity_name, entity in spec.get("state", {}).items():
+        for entity_name, entity in spec.get("entities", {}).items():
             for field_name, field in entity.get("fields", {}).items():
                 field_type = field.get("type", {})
                 if isinstance(field_type, dict) and "ref" in field_type:
@@ -518,7 +518,7 @@ class MeshValidator(
                     ))
 
         # Check entity references in functions
-        for func_name, func in spec.get("functions", {}).items():
+        for func_name, func in spec.get("commands", {}).items():
             # Check pre conditions
             for i, pre in enumerate(func.get("pre", [])):
                 if "entity" in pre:
@@ -532,10 +532,17 @@ class MeshValidator(
                 action = post.get("action", {})
                 for action_type in ["create", "update", "delete"]:
                     if action_type in action:
-                        add_if_error(self._check_entity_ref(
-                            f"functions.{func_name}.post[{i}]",
-                            action[action_type], entities
-                        ))
+                        action_val = action[action_type]
+                        # Support both formats: string "Entity" or dict {"target": "Entity", ...}
+                        if isinstance(action_val, dict):
+                            entity_ref = action_val.get("target")
+                        else:
+                            entity_ref = action_val
+                        if entity_ref:
+                            add_if_error(self._check_entity_ref(
+                                f"functions.{func_name}.post[{i}]",
+                                entity_ref, entities
+                            ))
 
         # Check derived entity references
         for derived_name, derived in spec.get("derived", {}).items():
@@ -642,7 +649,7 @@ class MeshValidator(
         3. Cascade options are valid
         """
         errors = []
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
         relations = spec.get("relations", {})
 
         # Build inverse mapping to check bidirectional consistency
@@ -905,7 +912,7 @@ class MeshValidator(
                 ))
 
         # Validate expressions in functions
-        for name, func in spec.get("functions", {}).items():
+        for name, func in spec.get("commands", {}).items():
             for i, pre in enumerate(func.get("pre", [])):
                 if "expr" in pre:
                     errors.extend(validate_discriminated_expression(
@@ -965,9 +972,9 @@ class MeshValidator(
     def _validate_expressions(self, spec: dict) -> list[ValidationError]:
         """Validate expression ASTs (Tagged Union format)"""
         errors = []
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
         derived = spec.get("derived", {})
-        functions = spec.get("functions", {})
+        functions = spec.get("commands", {})
 
         def validate_expr(expr: Any, path: str, context: dict) -> list[ValidationError]:
             """Recursively validate an expression (Tagged Union format)"""
@@ -1281,7 +1288,7 @@ class MeshValidator(
         # Step 1: Collect all enum definitions from entity fields
         # Map: "entity.field" -> [valid_values]
         enum_definitions: dict[str, list[str]] = {}
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
 
         for entity_name, entity in entities.items():
             for field_name, field in entity.get("fields", {}).items():
@@ -1397,7 +1404,7 @@ class MeshValidator(
                 errors.extend(extract_enum_errors(d["formula"], f"derived.{name}.formula"))
 
         # Check function pre/post conditions
-        for func_name, func in spec.get("functions", {}).items():
+        for func_name, func in spec.get("commands", {}).items():
             for i, pre in enumerate(func.get("pre", [])):
                 if "expr" in pre:
                     errors.extend(extract_enum_errors(pre["expr"], f"functions.{func_name}.pre[{i}].expr"))
@@ -1538,8 +1545,8 @@ class MeshValidator(
         Returns StructuredError with code TYP-002 for type mismatches.
         """
         errors = []
-        functions = spec.get("functions", {})
-        entities = spec.get("state", {})
+        functions = spec.get("commands", {})
+        entities = spec.get("entities", {})
 
         for func_name, func in functions.items():
             # Get declared inputs
@@ -1646,12 +1653,19 @@ class MeshValidator(
             # Validate type consistency for post actions with entities
             for i, post in enumerate(func.get("post", [])):
                 action = post.get("action", {})
-                entity_name = action.get("create") or action.get("update")
+                action_val = action.get("create") or action.get("update")
+                # Support both formats: string "Entity" or dict {"target": "Entity", ...}
+                if isinstance(action_val, dict):
+                    entity_name = action_val.get("target")
+                    with_values = action_val.get("data", {})
+                    set_values = action_val.get("set", {})
+                else:
+                    entity_name = action_val
+                    with_values = action.get("with", {})
+                    set_values = action.get("set", {})
 
                 if entity_name and entity_name in entities:
                     entity_fields = entities[entity_name].get("fields", {})
-                    with_values = action.get("with", {})
-                    set_values = action.get("set", {})
 
                     # Check field types in 'with'
                     for field_name, value in with_values.items():
@@ -1706,7 +1720,7 @@ class MeshValidator(
         Returns StructuredError with code REF-002 for invalid paths.
         """
         errors = []
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
         relations = spec.get("relations", {})
 
         # Build relation map for quick lookup
@@ -1832,7 +1846,7 @@ class MeshValidator(
             if "formula" in d:
                 errors.extend(find_refs(d["formula"], f"derived.{name}.formula"))
 
-        for func_name, func in spec.get("functions", {}).items():
+        for func_name, func in spec.get("commands", {}).items():
             for i, pre in enumerate(func.get("pre", [])):
                 if "expr" in pre:
                     errors.extend(find_refs(pre["expr"], f"functions.{func_name}.pre[{i}].expr"))
@@ -1856,8 +1870,8 @@ class MeshValidator(
         Returns StructuredError with codes FE-002 or FE-003.
         """
         errors = []
-        entities = set(spec.get("state", {}).keys())
-        functions = set(spec.get("functions", {}).keys())
+        entities = set(spec.get("entities", {}).keys())
+        functions = set(spec.get("commands", {}).keys())
         views = spec.get("views", {})
 
         for view_name, view in views.items():
@@ -1876,8 +1890,8 @@ class MeshValidator(
 
             # FE-002: Validate field references
             entity_fields = set()
-            if entity_name and entity_name in spec.get("state", {}):
-                entity_fields = set(spec["state"][entity_name].get("fields", {}).keys())
+            if entity_name and entity_name in spec.get("entities", {}):
+                entity_fields = set(spec["entities"][entity_name].get("fields", {}).keys())
 
             for i, field in enumerate(view.get("fields", [])):
                 field_name = field.get("name", "") if isinstance(field, dict) else field
@@ -2014,7 +2028,7 @@ class MeshValidator(
         Returns ValidationError with code FE-005 and severity="warning".
         """
         warnings = []
-        functions = set(spec.get("functions", {}).keys())
+        functions = set(spec.get("commands", {}).keys())
         views = spec.get("views", {})
 
         if not functions or not views:
@@ -2105,7 +2119,7 @@ class MeshValidator(
         from generators.constraint_inference import PRESETS
 
         errors = []
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
 
         valid_presets = set(PRESETS.keys())
 
@@ -2195,7 +2209,7 @@ class MeshValidator(
         This allows the LLM to review and confirm inferred constraints.
         """
         warnings = []
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
 
         for entity_name, entity_def in entities.items():
             fields = entity_def.get("fields", {})

@@ -32,7 +32,7 @@ def minimal_spec():
             "title": "Test Specification",
             "version": "1.0.0"
         },
-        "state": {}
+        "entities": {}
     }
 
 
@@ -49,7 +49,7 @@ class TestBuildFromSpec:
     def test_entity_nodes_created(self):
         """Entities should create nodes"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {
                 "fields": {
                     "amount": {"type": "int"}
@@ -71,7 +71,7 @@ class TestBuildFromSpec:
     def test_field_nodes_created(self):
         """Fields should create nodes"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {
                 "fields": {
                     "amount": {"type": "int"},
@@ -88,7 +88,7 @@ class TestBuildFromSpec:
     def test_reference_edges_created(self):
         """FK references should create edges"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {
                 "fields": {
                     "customer_id": {"type": {"ref": "Customer"}}
@@ -110,7 +110,7 @@ class TestBuildFromSpec:
     def test_function_nodes_created(self):
         """Functions should create nodes"""
         spec = minimal_spec()
-        spec["functions"] = {
+        spec["commands"] = {
             "create_invoice": {
                 "description": "Create invoice",
                 "input": {},
@@ -126,7 +126,7 @@ class TestBuildFromSpec:
     def test_derived_nodes_created(self):
         """Derived formulas should create nodes"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {
                 "fields": {"amount": {"type": "int"}}
             }
@@ -167,7 +167,7 @@ class TestGetDependencies:
     def test_no_dependencies(self):
         """Node with no dependencies returns empty set"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {
                 "fields": {"amount": {"type": "int"}}
             }
@@ -182,12 +182,12 @@ class TestGetDependencies:
     def test_function_depends_on_entity(self):
         """Function that modifies entity should depend on it"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {
                 "fields": {"amount": {"type": "int"}}
             }
         }
-        spec["functions"] = {
+        spec["commands"] = {
             "update_invoice": {
                 "description": "Update invoice",
                 "input": {},
@@ -213,7 +213,7 @@ class TestGetDependents:
     def test_no_dependents(self):
         """Leaf node with no dependents returns empty set"""
         spec = minimal_spec()
-        spec["functions"] = {
+        spec["commands"] = {
             "standalone_func": {
                 "description": "Standalone",
                 "input": {},
@@ -229,12 +229,12 @@ class TestGetDependents:
     def test_entity_has_dependents(self):
         """Entity referenced by function should have dependents"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {
                 "fields": {"amount": {"type": "int"}}
             }
         }
-        spec["functions"] = {
+        spec["commands"] = {
             "create_invoice": {
                 "description": "Create invoice",
                 "input": {},
@@ -260,7 +260,7 @@ class TestAnalyzeImpact:
     def test_impact_returns_dataclass(self):
         """analyze_impact should return ImpactAnalysis"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {"fields": {"amount": {"type": "int"}}}
         }
         graph = DependencyGraph()
@@ -272,10 +272,10 @@ class TestAnalyzeImpact:
     def test_entity_removal_affects_functions(self):
         """Removing entity should affect functions that use it"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {"fields": {"amount": {"type": "int"}}}
         }
-        spec["functions"] = {
+        spec["commands"] = {
             "create_invoice": {
                 "description": "Create invoice",
                 "input": {},
@@ -294,7 +294,7 @@ class TestAnalyzeImpact:
     def test_field_change_affects_derived(self):
         """Changing field should affect derived formulas using it"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {"fields": {"amount": {"type": "int"}}}
         }
         spec["derived"] = {
@@ -317,7 +317,7 @@ class TestGetSlice:
     def test_slice_returns_dict(self):
         """get_slice should return dictionary"""
         spec = minimal_spec()
-        spec["functions"] = {
+        spec["commands"] = {
             "test_func": {
                 "description": "Test",
                 "input": {},
@@ -333,10 +333,10 @@ class TestGetSlice:
     def test_slice_includes_function_dependencies(self):
         """Slice should include entities used by function"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {"fields": {"amount": {"type": "int"}}}
         }
-        spec["functions"] = {
+        spec["commands"] = {
             "create_invoice": {
                 "description": "Create invoice",
                 "input": {},
@@ -359,7 +359,7 @@ class TestCycleDetection:
     def test_no_cycle_in_linear_chain(self):
         """Linear chain of derived formulas should not be cyclic"""
         spec = minimal_spec()
-        spec["state"] = {
+        spec["entities"] = {
             "Invoice": {"fields": {"amount": {"type": "int"}}}
         }
         spec["derived"] = {

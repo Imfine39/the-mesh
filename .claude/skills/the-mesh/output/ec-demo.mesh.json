@@ -1,0 +1,647 @@
+{
+  "meta": {
+    "id": "ec-demo",
+    "title": "ECサイトデモ",
+    "version": "1.0.0",
+    "description": "シンプルなECサイトの仕様書"
+  },
+  "entities": {
+    "Product": {
+      "description": "商品",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "name": {
+          "type": "string",
+          "required": true
+        },
+        "price": {
+          "type": "int",
+          "required": true,
+          "description": "税抜価格（円）"
+        },
+        "stock": {
+          "type": "int",
+          "required": true,
+          "description": "在庫数"
+        }
+      }
+    },
+    "Cart": {
+      "description": "ショッピングカート",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "userId": {
+          "type": "string",
+          "required": true
+        },
+        "totalAmount": {
+          "type": "int",
+          "description": "合計金額"
+        }
+      }
+    },
+    "CartItem": {
+      "description": "カート内アイテム",
+      "parent": "Cart",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "cartId": {
+          "type": "string",
+          "ref": "Cart",
+          "required": true
+        },
+        "productId": {
+          "type": "string",
+          "ref": "Product",
+          "required": true
+        },
+        "quantity": {
+          "type": "int",
+          "required": true
+        },
+        "unitPrice": {
+          "type": "int",
+          "required": true
+        }
+      }
+    },
+    "Order": {
+      "description": "注文",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "userId": {
+          "type": "string",
+          "required": true
+        },
+        "totalAmount": {
+          "type": "int",
+          "required": true
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "PAID",
+            "SHIPPED",
+            "DELIVERED",
+            "CANCELLED"
+          ],
+          "required": true
+        },
+        "createdAt": {
+          "type": "datetime",
+          "required": true
+        }
+      }
+    },
+    "OrderItem": {
+      "description": "注文アイテム",
+      "parent": "Order",
+      "fields": {
+        "id": {
+          "type": "string",
+          "required": true
+        },
+        "orderId": {
+          "type": "string",
+          "ref": "Order",
+          "required": true
+        },
+        "productId": {
+          "type": "string",
+          "required": true
+        },
+        "productName": {
+          "type": "string",
+          "required": true
+        },
+        "quantity": {
+          "type": "int",
+          "required": true
+        },
+        "unitPrice": {
+          "type": "int",
+          "required": true
+        }
+      }
+    }
+  },
+  "commands": {
+    "addToCart": {
+      "description": "商品をカートに追加",
+      "entity": "Cart",
+      "input": {
+        "cartId": {
+          "type": "string",
+          "required": true
+        },
+        "productId": {
+          "type": "string",
+          "required": true
+        },
+        "quantity": {
+          "type": "int",
+          "required": true,
+          "min": 1
+        }
+      },
+      "output": {
+        "cartItem": {
+          "type": "CartItem"
+        }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "gt",
+            "left": {
+              "type": "input",
+              "field": "quantity"
+            },
+            "right": {
+              "type": "literal",
+              "value": 0
+            }
+          },
+          "reason": "数量は1以上を指定してください"
+        }
+      ],
+      "post": [
+        {
+          "id": "create_cart_item",
+          "action": {
+            "create": {
+              "target": "CartItem",
+              "data": {
+                "id": {
+                  "type": "call",
+                  "function": "generateId"
+                },
+                "cartId": {
+                  "type": "input",
+                  "field": "cartId"
+                },
+                "productId": {
+                  "type": "input",
+                  "field": "productId"
+                },
+                "quantity": {
+                  "type": "input",
+                  "field": "quantity"
+                },
+                "unitPrice": {
+                  "type": "ref",
+                  "path": "product.price"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "decrement_stock",
+          "action": {
+            "update": {
+              "target": "Product",
+              "id": {
+                "type": "input",
+                "field": "productId"
+              },
+              "set": {
+                "stock": {
+                  "type": "binary",
+                  "op": "sub",
+                  "left": {
+                    "type": "self",
+                    "field": "stock"
+                  },
+                  "right": {
+                    "type": "input",
+                    "field": "quantity"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "errors": [
+        {
+          "code": "INVALID_QUANTITY",
+          "status": 400,
+          "message": "数量が無効です"
+        },
+        {
+          "code": "OUT_OF_STOCK",
+          "status": 400,
+          "message": "在庫不足"
+        },
+        {
+          "code": "PRODUCT_NOT_FOUND",
+          "status": 404,
+          "message": "商品が見つかりません"
+        }
+      ]
+    },
+    "removeFromCart": {
+      "description": "カートから商品を削除",
+      "entity": "CartItem",
+      "input": {
+        "cartItemId": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "success": {
+          "type": "bool"
+        }
+      },
+      "post": [
+        {
+          "id": "restore_stock",
+          "action": {
+            "update": {
+              "target": "Product",
+              "id": {
+                "type": "ref",
+                "path": "cartItem.productId"
+              },
+              "set": {
+                "stock": {
+                  "type": "binary",
+                  "op": "add",
+                  "left": {
+                    "type": "self",
+                    "field": "stock"
+                  },
+                  "right": {
+                    "type": "ref",
+                    "path": "cartItem.quantity"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "delete_item",
+          "action": {
+            "delete": {
+              "target": "CartItem",
+              "id": {
+                "type": "input",
+                "field": "cartItemId"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "checkout": {
+      "description": "カートの内容で注文を確定",
+      "entity": "Order",
+      "input": {
+        "cartId": {
+          "type": "string",
+          "required": true
+        },
+        "userId": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "order": {
+          "type": "Order"
+        }
+      },
+      "post": [
+        {
+          "id": "create_order",
+          "action": {
+            "create": {
+              "target": "Order",
+              "data": {
+                "id": {
+                  "type": "call",
+                  "function": "generateId"
+                },
+                "userId": {
+                  "type": "input",
+                  "field": "userId"
+                },
+                "totalAmount": {
+                  "type": "literal",
+                  "value": 0
+                },
+                "status": {
+                  "type": "literal",
+                  "value": "PENDING"
+                },
+                "createdAt": {
+                  "type": "call",
+                  "function": "now"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "errors": [
+        {
+          "code": "EMPTY_CART",
+          "status": 400,
+          "message": "カートが空です"
+        },
+        {
+          "code": "CART_NOT_FOUND",
+          "status": 404,
+          "message": "カートが見つかりません"
+        }
+      ]
+    },
+    "cancelOrder": {
+      "description": "注文をキャンセル",
+      "entity": "Order",
+      "input": {
+        "orderId": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "order": {
+          "type": "Order"
+        }
+      },
+      "pre": [
+        {
+          "expr": {
+            "type": "binary",
+            "op": "eq",
+            "left": {
+              "type": "ref",
+              "path": "order.status"
+            },
+            "right": {
+              "type": "literal",
+              "value": "PENDING"
+            }
+          },
+          "reason": "この注文はキャンセルできません"
+        }
+      ],
+      "post": [
+        {
+          "id": "update_status",
+          "action": {
+            "update": {
+              "target": "Order",
+              "id": {
+                "type": "input",
+                "field": "orderId"
+              },
+              "set": {
+                "status": {
+                  "type": "literal",
+                  "value": "CANCELLED"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "errors": [
+        {
+          "code": "ORDER_NOT_FOUND",
+          "status": 404,
+          "message": "注文が見つかりません"
+        },
+        {
+          "code": "CANNOT_CANCEL",
+          "status": 400,
+          "message": "キャンセルできない状態です"
+        }
+      ]
+    }
+  },
+  "scenarios": {
+    "add_item_to_cart": {
+      "description": "商品をカートに追加するシナリオ",
+      "given": [
+        {
+          "entity": "Product",
+          "id": "prod-001",
+          "data": {
+            "name": "テスト商品",
+            "price": 1000,
+            "stock": 10
+          }
+        },
+        {
+          "entity": "Cart",
+          "id": "cart-001",
+          "data": {
+            "userId": "user-001",
+            "totalAmount": 0
+          }
+        }
+      ],
+      "when": {
+        "command": "addToCart",
+        "input": {
+          "cartId": "cart-001",
+          "productId": "prod-001",
+          "quantity": 2
+        }
+      },
+      "then": [
+        {
+          "entity": "Product",
+          "id": "prod-001",
+          "expect": {
+            "stock": 8
+          }
+        },
+        {
+          "output": {
+            "cartItem": {
+              "quantity": 2,
+              "unitPrice": 1000
+            }
+          }
+        }
+      ]
+    },
+    "checkout_success": {
+      "description": "チェックアウト成功シナリオ",
+      "given": [
+        {
+          "entity": "Cart",
+          "id": "cart-001",
+          "data": {
+            "userId": "user-001",
+            "totalAmount": 2000
+          }
+        },
+        {
+          "entity": "CartItem",
+          "id": "item-001",
+          "data": {
+            "cartId": "cart-001",
+            "productId": "prod-001",
+            "quantity": 2,
+            "unitPrice": 1000
+          }
+        }
+      ],
+      "when": {
+        "command": "checkout",
+        "input": {
+          "cartId": "cart-001",
+          "userId": "user-001"
+        }
+      },
+      "then": [
+        {
+          "output": {
+            "order": {
+              "status": "PENDING",
+              "userId": "user-001"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "testStrategies": {
+    "templates": {
+      "idempotency": {
+        "enabled": true,
+        "targets": [
+          "addToCart"
+        ]
+      },
+      "concurrency": {
+        "enabled": true,
+        "targets": [
+          "Product"
+        ],
+        "parallelRequests": 3
+      }
+    }
+  },
+  "derived": {
+    "CartItem.subtotal": {
+      "entity": "CartItem",
+      "field": "subtotal",
+      "formula": {
+        "type": "binary",
+        "op": "mul",
+        "left": {
+          "type": "self",
+          "field": "quantity"
+        },
+        "right": {
+          "type": "self",
+          "field": "unitPrice"
+        }
+      }
+    },
+    "Cart.totalAmount": {
+      "entity": "Cart",
+      "field": "totalAmount",
+      "formula": {
+        "type": "agg",
+        "op": "sum",
+        "from": "CartItem",
+        "expr": {
+          "type": "binary",
+          "op": "mul",
+          "left": {
+            "type": "ref",
+            "path": "cartItems.quantity"
+          },
+          "right": {
+            "type": "ref",
+            "path": "cartItems.unitPrice"
+          }
+        },
+        "where": {
+          "type": "binary",
+          "op": "eq",
+          "left": {
+            "type": "ref",
+            "path": "cartItems.cartId"
+          },
+          "right": {
+            "type": "self",
+            "field": "id"
+          }
+        }
+      }
+    },
+    "OrderItem.subtotal": {
+      "entity": "OrderItem",
+      "field": "subtotal",
+      "formula": {
+        "type": "binary",
+        "op": "mul",
+        "left": {
+          "type": "self",
+          "field": "quantity"
+        },
+        "right": {
+          "type": "self",
+          "field": "unitPrice"
+        }
+      }
+    },
+    "Order.totalAmount": {
+      "entity": "Order",
+      "field": "totalAmount",
+      "formula": {
+        "type": "agg",
+        "op": "sum",
+        "from": "OrderItem",
+        "expr": {
+          "type": "binary",
+          "op": "mul",
+          "left": {
+            "type": "ref",
+            "path": "orderItems.quantity"
+          },
+          "right": {
+            "type": "ref",
+            "path": "orderItems.unitPrice"
+          }
+        },
+        "where": {
+          "type": "binary",
+          "op": "eq",
+          "left": {
+            "type": "ref",
+            "path": "orderItems.orderId"
+          },
+          "right": {
+            "type": "self",
+            "field": "id"
+          }
+        }
+      }
+    }
+  }
+}

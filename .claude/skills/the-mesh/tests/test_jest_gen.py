@@ -17,7 +17,7 @@ SAMPLE_SPEC = {
         "title": "Test System",
         "version": "1.0.0"
     },
-    "state": {
+    "entities": {
         "invoice": {
             "description": "Invoice entity",
             "fields": {
@@ -47,7 +47,7 @@ SAMPLE_SPEC = {
             }
         }
     },
-    "functions": {
+    "commands": {
         "create_invoice": {
             "description": "Create a new invoice",
             "input": {
@@ -126,7 +126,7 @@ SAMPLE_SPEC = {
 def test_jest_generator_basic():
     """Test basic Jest generator instantiation"""
     gen = JestGenerator(SAMPLE_SPEC)
-    assert gen.entities == SAMPLE_SPEC["state"]
+    assert gen.entities == SAMPLE_SPEC["entities"]
     assert gen.scenarios == SAMPLE_SPEC["scenarios"]
 
 

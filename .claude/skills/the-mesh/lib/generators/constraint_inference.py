@@ -220,7 +220,7 @@ def build_constraint_cache(spec: dict[str, Any]) -> dict[str, dict[str, FieldCon
     """
     cache: dict[str, dict[str, FieldConstraints]] = {}
 
-    entities = spec.get("state", {})
+    entities = spec.get("entities", {})
     for entity_name, entity_def in entities.items():
         cache[entity_name] = {}
         fields = entity_def.get("fields", {})

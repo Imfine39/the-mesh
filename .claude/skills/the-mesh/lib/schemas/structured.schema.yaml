@@ -1,0 +1,553 @@
+# Structured YAML Schema for the-mesh
+# This schema defines the "Customer Layer" format that gets converted to TRIR
+# All field names and values should be in English
+# Customers confirm specifications via generated visualizations (flow diagrams, decision tables)
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "https://the-mesh.dev/schemas/structured/structured.schema.yaml"
+title: Structured YAML Schema
+description: Customer-friendly YAML format that converts to TRIR
+
+definitions:
+  # =============================================================================
+  # Type Definitions
+  # =============================================================================
+
+  FieldType:
+    description: Field type keywords
+    type: string
+    enum:
+      - id          # Unique identifier (string, preset: id)
+      - money       # Monetary value (float, preset: money)
+      - count       # Non-negative integer (int, preset: count)
+      - string      # Text value
+      - bool        # Boolean
+      - datetime    # Date and time
+      - enum        # Enumerated values (requires 'values')
+      - ref         # Reference to another entity (requires 'ref')
+      - list        # List of values
+
+  FieldDefinition:
+    type: object
+    properties:
+      type:
+        $ref: "#/definitions/FieldType"
+      required:
+        type: boolean
+        default: false
+      unique:
+        type: boolean
+        default: false
+      min:
+        type: number
+        description: Minimum value (for count, money)
+      max:
+        type: number
+        description: Maximum value (for count, money)
+      values:
+        type: array
+        items:
+          type: string
+        description: Enum values (required when type is 'enum')
+      ref:
+        type: string
+        description: Referenced entity name (required when type is 'ref')
+      default: {}
+    required:
+      - type
+
+  # =============================================================================
+  # Expression Definitions (3 Levels)
+  # =============================================================================
+
+  # Level 1: Simple condition
+  SimpleExpression:
+    type: object
+    properties:
+      field:
+        type: string
+        description: |
+          Field reference with prefix:
+          - input:fieldName - Input parameter
+          - self:fieldName - Current entity field
+          - EntityName:fieldName - Other entity field
+      op:
+        type: string
+        enum: ["==", "!=", "<", "<=", ">", ">=", "in", "not_in"]
+      value:
+        description: Literal value to compare
+      ref:
+        type: string
+        description: Reference to another field (instead of value)
+    required:
+      - field
+      - op
+
+  # Level 2: Compound condition
+  CompoundExpression:
+    type: object
+    properties:
+      and:
+        type: array
+        items:
+          $ref: "#/definitions/Expression"
+      or:
+        type: array
+        items:
+          $ref: "#/definitions/Expression"
+      not:
+        $ref: "#/definitions/Expression"
+
+  # Level 3: Raw TRIR expression (escape hatch)
+  RawExpression:
+    type: object
+    properties:
+      expr:
+        type: object
+        description: Raw TRIR expression object
+
+  # Combined expression type
+  Expression:
+    oneOf:
+      - $ref: "#/definitions/SimpleExpression"
+      - $ref: "#/definitions/CompoundExpression"
+      - $ref: "#/definitions/RawExpression"
+
+  # =============================================================================
+  # Entity Definition
+  # =============================================================================
+
+  Entity:
+    type: object
+    properties:
+      description:
+        type: string
+      aggregateRoot:
+        type: boolean
+        default: false
+        description: Whether this entity is an aggregate root (DDD)
+      parent:
+        type: string
+        description: Parent entity for non-aggregate-root entities
+      fields:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/FieldDefinition"
+    required:
+      - fields
+
+  # =============================================================================
+  # State Machine Definitions
+  # =============================================================================
+
+  StateDefinition:
+    type: object
+    properties:
+      description:
+        type: string
+      final:
+        type: boolean
+        default: false
+      confirmed:
+        type: boolean
+        default: false
+        description: Whether this state is a confirmation state
+
+  TransitionDefinition:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for this transition
+      from:
+        oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+        description: Source state(s)
+      to:
+        type: string
+        description: Target state
+      trigger:
+        type: string
+        enum:
+          - user      # Explicit user action
+          - external  # External system/webhook
+          - auto      # Automatic on condition
+          - timer     # Scheduled/timed
+      trigger_function:
+        type: string
+        description: Function that triggers this transition
+      guard:
+        $ref: "#/definitions/Expression"
+        description: Condition for transition
+      error:
+        type: string
+        description: Error message when guard fails
+    required:
+      - from
+      - to
+
+  StateMachine:
+    type: object
+    properties:
+      entity:
+        type: string
+        description: Target entity
+      field:
+        type: string
+        description: Status field name
+      initial:
+        type: string
+        description: Initial state
+      states:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/StateDefinition"
+      transitions:
+        type: array
+        items:
+          $ref: "#/definitions/TransitionDefinition"
+    required:
+      - entity
+      - field
+      - initial
+      - states
+      - transitions
+
+  # =============================================================================
+  # Command Definition
+  # =============================================================================
+
+  Precondition:
+    type: object
+    properties:
+      expr:
+        $ref: "#/definitions/Expression"
+      error:
+        type: string
+        description: Error message when condition fails
+    required:
+      - expr
+      - error
+
+  Command:
+    type: object
+    properties:
+      description:
+        type: string
+      entity:
+        type: string
+        description: Primary entity this command operates on
+      input:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/FieldDefinition"
+      output:
+        type: object
+        additionalProperties:
+          $ref: "#/definitions/FieldDefinition"
+      pre:
+        type: array
+        items:
+          $ref: "#/definitions/Precondition"
+        description: Preconditions to check
+      triggers:
+        type: array
+        items:
+          type: string
+        description: State machine transitions this command triggers (format: FlowName.transition_id)
+      saga:
+        type: string
+        description: Saga to execute for distributed transaction
+    required:
+      - entity
+
+  # =============================================================================
+  # Query Definition
+  # =============================================================================
+
+  Query:
+    type: object
+    properties:
+      description:
+        type: string
+      entity:
+        type: string
+        description: Primary entity to query
+      filter:
+        $ref: "#/definitions/Expression"
+        description: Filter condition
+      orderBy:
+        type: object
+        properties:
+          field:
+            type: string
+          direction:
+            type: string
+            enum: [asc, desc]
+            default: asc
+      pagination:
+        type: object
+        properties:
+          defaultLimit:
+            type: integer
+            default: 20
+          maxLimit:
+            type: integer
+            default: 100
+    required:
+      - entity
+
+  # =============================================================================
+  # Saga Definition
+  # =============================================================================
+
+  SagaStep:
+    type: object
+    properties:
+      name:
+        type: string
+      forward:
+        type: string
+        description: Function or transition to execute
+      compensate:
+        type: string
+        description: Compensation function
+    required:
+      - name
+      - forward
+
+  Saga:
+    type: object
+    properties:
+      description:
+        type: string
+      steps:
+        type: array
+        items:
+          $ref: "#/definitions/SagaStep"
+      onFailure:
+        type: string
+        enum: [compensate_all, compensate_completed, abort]
+        default: compensate_all
+    required:
+      - steps
+
+  # =============================================================================
+  # Invariant Definition
+  # =============================================================================
+
+  Invariant:
+    type: object
+    properties:
+      id:
+        type: string
+      entity:
+        type: string
+      description:
+        type: string
+      when:
+        $ref: "#/definitions/Expression"
+        description: Condition under which this invariant applies
+      expr:
+        $ref: "#/definitions/Expression"
+      severity:
+        type: string
+        enum: [error, critical, warning]
+        default: error
+      violation:
+        type: string
+        description: Human-readable violation message
+    required:
+      - id
+      - entity
+      - expr
+
+  # =============================================================================
+  # Role Definition
+  # =============================================================================
+
+  RolePermission:
+    type: object
+    properties:
+      resource:
+        type: string
+        description: Entity or resource name
+      actions:
+        type: array
+        items:
+          type: string
+          enum: [create, read, update, delete, list]
+      condition:
+        $ref: "#/definitions/Expression"
+        description: Row-level condition
+    required:
+      - resource
+      - actions
+
+  Role:
+    type: object
+    properties:
+      description:
+        type: string
+      permissions:
+        type: array
+        items:
+          $ref: "#/definitions/RolePermission"
+    required:
+      - permissions
+
+  # =============================================================================
+  # Test Strategies Definition
+  # =============================================================================
+
+  TestStrategies:
+    type: object
+    properties:
+      coverage:
+        type: object
+        properties:
+          mode:
+            type: string
+            enum: [full, risk_based, minimal]
+            default: risk_based
+          maxScenarios:
+            type: integer
+          prioritize:
+            type: array
+            items:
+              type: object
+              properties:
+                severity:
+                  type: array
+                  items:
+                    type: string
+                entities:
+                  type: array
+                  items:
+                    type: string
+                presets:
+                  type: array
+                  items:
+                    type: string
+      templates:
+        type: object
+        properties:
+          boundary_values:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+                default: true
+              targets:
+                type: array
+                items:
+                  type: string
+          state_transition:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+                default: true
+              testTypes:
+                type: array
+                items:
+                  type: string
+                  enum: [invalid_from_state, final_state_exit, guard_failure, happy_path]
+          idempotency:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+                default: false
+              targets:
+                type: array
+                items:
+                  type: string
+          concurrency:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+                default: false
+              targets:
+                type: array
+                items:
+                  type: string
+              parallelRequests:
+                type: integer
+                default: 2
+          authorization:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+                default: true
+              targets:
+                type: array
+                items:
+                  type: string
+
+# =============================================================================
+# Top-Level Schema
+# =============================================================================
+
+type: object
+properties:
+  meta:
+    type: object
+    properties:
+      id:
+        type: string
+      title:
+        type: string
+      version:
+        type: string
+    required:
+      - id
+      - title
+      - version
+
+  entities:
+    type: object
+    additionalProperties:
+      $ref: "#/definitions/Entity"
+
+  stateMachines:
+    type: object
+    additionalProperties:
+      $ref: "#/definitions/StateMachine"
+
+  commands:
+    type: object
+    additionalProperties:
+      $ref: "#/definitions/Command"
+
+  queries:
+    type: object
+    additionalProperties:
+      $ref: "#/definitions/Query"
+
+  sagas:
+    type: object
+    additionalProperties:
+      $ref: "#/definitions/Saga"
+
+  invariants:
+    type: array
+    items:
+      $ref: "#/definitions/Invariant"
+
+  roles:
+    type: object
+    additionalProperties:
+      $ref: "#/definitions/Role"
+
+  testStrategies:
+    $ref: "#/definitions/TestStrategies"
+
+required:
+  - meta
+  - entities

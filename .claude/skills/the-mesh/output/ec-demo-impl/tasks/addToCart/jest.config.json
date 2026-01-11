@@ -1,0 +1,14 @@
+{
+  "rootDir": ".",
+  "testMatch": [
+    "<rootDir>/../../.mesh/tests/at/addToCart.at.test.ts",
+    "<rootDir>/../../.mesh/tests/ut/unit.test.ts",
+    "<rootDir>/../../.mesh/tests/at/removeFromCart.at.test.ts"
+  ],
+  "moduleDirectories": [
+    "node_modules",
+    "../../src"
+  ],
+  "preset": "ts-jest",
+  "testEnvironment": "node"
+}

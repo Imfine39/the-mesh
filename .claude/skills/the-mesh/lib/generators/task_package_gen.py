@@ -56,8 +56,8 @@ class TaskPackageGenerator:
         self.graph = DependencyGraph()
         self.graph.build_from_spec(spec)
 
-        self.entities = spec.get("state", {})
-        self.functions = spec.get("functions", {})
+        self.entities = spec.get("entities", {})
+        self.functions = spec.get("commands", {})
         self.scenarios = spec.get("scenarios", {})
         self.derived = spec.get("derived", {})
         self.invariants = spec.get("invariants", [])
@@ -127,7 +127,9 @@ class TaskPackageGenerator:
             action = post.get("action", {})
             for action_type in ["create", "update", "delete"]:
                 if action_type in action:
-                    modified_entities.add(action[action_type])
+                    target = self._get_action_target(action[action_type])
+                    if target:
+                        modified_entities.add(target)
 
         # Find other functions that read these entities
         for other_func, other_def in self.functions.items():
@@ -144,10 +146,26 @@ class TaskPackageGenerator:
             for post in other_def.get("post", []):
                 action = post.get("action", {})
                 for action_type in ["create", "update", "delete"]:
-                    if action.get(action_type) in modified_entities:
+                    target = self._get_action_target(action.get(action_type))
+                    if target in modified_entities:
                         related.add(other_func)
 
         return sorted(related)
+
+    def _get_action_target(self, action_value) -> str | None:
+        """Extract target entity name from action value.
+
+        Supports both formats:
+        - Legacy: "Invoice" (string directly)
+        - New: {"target": "Invoice", "data": {...}} (dict with target)
+        """
+        if action_value is None:
+            return None
+        if isinstance(action_value, str):
+            return action_value
+        if isinstance(action_value, dict):
+            return action_value.get("target")
+        return None
 
     def _extract_entity_refs(self, expr: dict) -> set[str]:
         """Extract entity references from expression"""

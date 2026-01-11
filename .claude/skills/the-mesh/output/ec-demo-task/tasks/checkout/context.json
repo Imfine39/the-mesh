@@ -1,0 +1,57 @@
+{
+  "function": "checkout",
+  "function_def": {
+    "description": "カートの内容で注文を確定",
+    "entity": "Order",
+    "input": {
+      "cartId": {
+        "type": "string",
+        "required": true
+      },
+      "userId": {
+        "type": "string",
+        "required": true
+      }
+    },
+    "output": {
+      "order": {
+        "type": "Order"
+      }
+    },
+    "post": [
+      {
+        "action": {
+          "create": {
+            "target": "Order",
+            "data": {
+              "id": {
+                "type": "call",
+                "function": "generateId"
+              },
+              "userId": {
+                "type": "input",
+                "field": "userId"
+              },
+              "totalAmount": {
+                "type": "literal",
+                "value": 0
+              },
+              "status": {
+                "type": "literal",
+                "value": "PENDING"
+              },
+              "createdAt": {
+                "type": "call",
+                "function": "now"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "entities": {},
+  "derived": {},
+  "scenarios": {},
+  "invariants": []
+}

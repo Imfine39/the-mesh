@@ -28,7 +28,7 @@ class MiscValidationMixin:
         """
         errors = []
         gateways = spec.get("gateways", {})
-        functions = spec.get("functions", {})
+        functions = spec.get("commands", {})
         events = spec.get("events", {})
 
         valid_gateway_types = ["exclusive", "parallel", "inclusive", "event_based"]
@@ -96,8 +96,8 @@ class MiscValidationMixin:
         """
         errors = []
         deadlines = spec.get("deadlines", {})
-        entities = spec.get("state", {})
-        functions = spec.get("functions", {})
+        entities = spec.get("entities", {})
+        functions = spec.get("commands", {})
         events = spec.get("events", {})
 
         for dl_name, dl in deadlines.items():
@@ -171,7 +171,7 @@ class MiscValidationMixin:
         """
         errors = []
         schedules = spec.get("schedules", {})
-        functions = spec.get("functions", {})
+        functions = spec.get("commands", {})
 
         # Cron expression: 5 or 6 fields (second minute hour day month weekday [year])
         # Simple validation - check field count and basic patterns
@@ -249,7 +249,7 @@ class MiscValidationMixin:
         """
         errors = []
         constraints = spec.get("constraints", {})
-        entities = spec.get("state", {})
+        entities = spec.get("entities", {})
 
         valid_constraint_types = ["unique", "check", "foreign_key"]
 

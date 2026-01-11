@@ -18,7 +18,7 @@ SAMPLE_SPEC = {
         "version": "1.0.0",
         "description": "A test API"
     },
-    "state": {
+    "entities": {
         "invoice": {
             "description": "Invoice entity",
             "fields": {
@@ -37,7 +37,7 @@ SAMPLE_SPEC = {
             }
         }
     },
-    "functions": {
+    "commands": {
         "create_invoice": {
             "description": "Create a new invoice",
             "input": {
@@ -255,7 +255,7 @@ class TestOpenAPIGeneratorEdgeCases:
     def test_function_no_input(self):
         """Test function without input"""
         spec = {
-            "functions": {
+            "commands": {
                 "get_status": {
                     "description": "Get status",
                     "output": {
@@ -273,7 +273,7 @@ class TestOpenAPIGeneratorEdgeCases:
     def test_multiple_errors_same_status(self):
         """Test multiple errors with same HTTP status"""
         spec = {
-            "functions": {
+            "commands": {
                 "test_func": {
                     "input": {"id": {"type": "string"}},
                     "error": [
@@ -296,7 +296,7 @@ class TestOpenAPIGeneratorEdgeCases:
     def test_datetime_type(self):
         """Test datetime type conversion"""
         spec = {
-            "state": {
+            "entities": {
                 "event": {
                     "fields": {
                         "created_at": {"type": "datetime", "required": True}

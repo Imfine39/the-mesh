@@ -131,7 +131,7 @@ class ProjectConfig:
         impl_config = config.get("implementation", {})
 
         # Check for per-function override
-        func_overrides = impl_config.get("functions", {})
+        func_overrides = impl_config.get("commands", {})
         if function_name in func_overrides:
             return func_overrides[function_name].get("module", function_name)
 
@@ -164,11 +164,11 @@ class ProjectConfig:
         """Set the import module for a specific function."""
         config = self.load()
         if "implementation" not in config:
-            config["implementation"] = {"functions": {}}
-        if "functions" not in config["implementation"]:
-            config["implementation"]["functions"] = {}
+            config["implementation"] = {"commands": {}}
+        if "commands" not in config["implementation"]:
+            config["implementation"]["commands"] = {}
 
-        config["implementation"]["functions"][function_name] = {"module": module}
+        config["implementation"]["commands"][function_name] = {"module": module}
         self.save(config)
 
     def get_all_import_modules(self, function_names: list[str]) -> dict[str, str]:

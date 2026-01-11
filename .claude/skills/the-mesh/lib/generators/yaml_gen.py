@@ -29,11 +29,11 @@ class YAMLGenerator:
 
         human_section = {}
         if section == "state":
-            human_section = self._transform_entities(self.spec["state"])
+            human_section = self._transform_entities(self.spec["entities"])
         elif section == "derived":
             human_section = self._transform_derived(self.spec["derived"])
         elif section == "functions":
-            human_section = self._transform_functions(self.spec["functions"])
+            human_section = self._transform_functions(self.spec["commands"])
         elif section == "scenarios":
             human_section = self._transform_scenarios(self.spec["scenarios"])
         elif section == "invariants":
@@ -47,9 +47,9 @@ class YAMLGenerator:
         """Transform full spec to human-readable format"""
         return {
             "meta": spec.get("meta", {}),
-            "state": self._transform_entities(spec.get("state", {})),
+            "state": self._transform_entities(spec.get("entities", {})),
             "derived": self._transform_derived(spec.get("derived", {})),
-            "functions": self._transform_functions(spec.get("functions", {})),
+            "functions": self._transform_functions(spec.get("commands", {})),
             "scenarios": self._transform_scenarios(spec.get("scenarios", {})),
             "invariants": self._transform_invariants(spec.get("invariants", []))
         }
@@ -305,24 +305,46 @@ class YAMLGenerator:
     def _action_to_human(self, action: dict) -> dict:
         """Convert action to human-readable format"""
         if "create" in action:
+            create_action = action["create"]
+            # Support both formats: string or dict {"target": ..., "data": {...}}
+            if isinstance(create_action, dict):
+                entity = create_action.get("target", "")
+                with_values = create_action.get("data", {})
+            else:
+                entity = create_action
+                with_values = action.get("with", {})
             return {
-                "create": action["create"],
+                "create": entity,
                 "with": {
                     k: self._expr_to_human(v)
-                    for k, v in action.get("with", {}).items()
+                    for k, v in with_values.items()
                 }
             }
         if "update" in action:
+            update_action = action["update"]
+            # Support both formats: string or dict {"target": ..., "set": {...}}
+            if isinstance(update_action, dict):
+                entity = update_action.get("target", "")
+                set_values = update_action.get("set", {})
+            else:
+                entity = update_action
+                set_values = action.get("set", {})
             return {
-                "update": action["update"],
+                "update": entity,
                 "set": {
                     k: self._expr_to_human(v)
-                    for k, v in action.get("set", {}).items()
+                    for k, v in set_values.items()
                 }
             }
         if "delete" in action:
+            delete_action = action["delete"]
+            # Support both formats: string or dict {"target": ..., "id": {...}}
+            if isinstance(delete_action, dict):
+                entity = delete_action.get("target", "")
+            else:
+                entity = delete_action
             return {
-                "delete": action["delete"],
+                "delete": entity,
                 "where": self._expr_to_human(action.get("where", {}))
             }
         return action

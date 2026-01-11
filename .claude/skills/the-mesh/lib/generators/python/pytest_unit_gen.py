@@ -43,9 +43,9 @@ class PytestUnitGenerator:
 
     def __init__(self, spec: dict[str, Any]):
         self.spec = spec
-        self.entities = spec.get("state", {})
+        self.entities = spec.get("entities", {})
         self.derived = spec.get("derived", {})
-        self.functions = spec.get("functions", {})
+        self.functions = spec.get("commands", {})
         self.invariants = spec.get("invariants", [])
 
         # Build constraint cache
@@ -100,7 +100,7 @@ class PytestUnitGenerator:
         cases = []
 
         for func_name, func_def in self.functions.items():
-            for i, error_def in enumerate(func_def.get("error", [])):
+            for i, error_def in enumerate(func_def.get("errors", [])):
                 error_code = error_def.get("code", f"ERR_{i+1:03d}")
                 reason = error_def.get("reason", "")
 
@@ -258,43 +258,57 @@ class PytestUnitGenerator:
                 lines.append(f'    if "{field_name}" in data and data["{field_name}"] is not None:')
                 indent = '        '
 
+            # Track if any constraints were added after the if/else
+            constraints_added = False
+
             # Min constraint
             if constraints.min is not None:
                 lines.append(f'{indent}if isinstance(data["{field_name}"], (int, float)) and data["{field_name}"] < {constraints.min}:')
                 lines.append(f'{indent}    errors.append("{field_name}: must be >= {constraints.min}")')
+                constraints_added = True
 
             # Max constraint
             if constraints.max is not None:
                 lines.append(f'{indent}if isinstance(data["{field_name}"], (int, float)) and data["{field_name}"] > {constraints.max}:')
                 lines.append(f'{indent}    errors.append("{field_name}: must be <= {constraints.max}")')
+                constraints_added = True
 
             # MinLength constraint
             if constraints.min_length is not None:
                 lines.append(f'{indent}if isinstance(data["{field_name}"], str) and len(data["{field_name}"]) < {constraints.min_length}:')
                 lines.append(f'{indent}    errors.append("{field_name}: length must be >= {constraints.min_length}")')
+                constraints_added = True
 
             # MaxLength constraint
             if constraints.max_length is not None:
                 lines.append(f'{indent}if isinstance(data["{field_name}"], str) and len(data["{field_name}"]) > {constraints.max_length}:')
                 lines.append(f'{indent}    errors.append("{field_name}: length must be <= {constraints.max_length}")')
+                constraints_added = True
 
             # Pattern constraint
             if constraints.pattern is not None:
                 pattern_escaped = constraints.pattern.replace('\\', '\\\\').replace('"', '\\"')
                 lines.append(f'{indent}if isinstance(data["{field_name}"], str) and not re.match(r"{pattern_escaped}", data["{field_name}"]):')
                 lines.append(f'{indent}    errors.append("{field_name}: must match pattern {pattern_escaped}")')
+                constraints_added = True
 
             # Enum check
             if isinstance(field_type, dict) and "enum" in field_type:
                 enum_values = field_type["enum"]
                 lines.append(f'{indent}if data["{field_name}"] not in {repr(enum_values)}:')
                 lines.append(f'{indent}    errors.append("{field_name}: must be one of {enum_values}")')
+                constraints_added = True
 
             # Empty string check for required strings
             if required and (field_type == "string" or field_type == "text"):
                 if constraints.min_length is None or constraints.min_length == 0:
                     lines.append(f'{indent}if isinstance(data["{field_name}"], str) and data["{field_name}"] == "":')
                     lines.append(f'{indent}    errors.append("{field_name}: cannot be empty string")')
+                    constraints_added = True
+
+            # Add pass if no constraints were added (to avoid empty else block)
+            if not constraints_added:
+                lines.append(f'{indent}pass  # No additional constraints')
 
             lines.append('')
 
